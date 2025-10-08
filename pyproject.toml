@@ -1,0 +1,46 @@
+[project]
+name = "tiferet-fast"
+dynamic = ["version"]  # Mark version as dynamic
+description = "An extension of the Tiferet Framework for the Fast API."
+authors = [
+    { name = "Andrew Shatz, Great Strength Systems", email = "andrew@greatstrength.me" }
+]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "tiferet>=1.1.2",
+    "fastapi>=0.118.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/greatstrength/tiferet-fast"
+Repository = "https://github.com/greatstrength/tiferet-fast"
+Download = "https://github.com/greatstrength/tiferet-fast"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=8.3.3",
+    "pytest_env>=1.1.5"
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+    "tiferet_fast",
+    "tiferet_fast.contexts",
+    "tiferet_fast.contracts",
+    "tiferet_fast.data",
+    "tiferet_fast.handlers",
+    "tiferet_fast.models",
+    "tiferet_fast.proxies",
+    "tiferet_fast.proxies.yaml"
+]
+
+[tool.setuptools.dynamic]
+version = { attr = "tiferet_fast.__version__" }
+
