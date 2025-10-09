@@ -5,5 +5,6 @@
 # ** app
 from .fast import (
     FastRouteContract,
-    FastRouterContract
+    FastRouterContract,
+    FastApiRepository
 )
