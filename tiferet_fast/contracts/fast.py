@@ -57,14 +57,14 @@ class FastApiRepository(Repository):
 
     # * method: get_route
     @abstractmethod
-    def get_route(self, route_id: str, blueprint_name: str = None) -> FastRouteContract:
+    def get_route(self, route_id: str, router_name: str = None) -> FastRouteContract:
         '''
-        Retrieve a specific Fast route by its blueprint and route IDs.
+        Retrieve a specific Fast route by its router and route IDs.
 
-        :param route_id: The ID of the route within the blueprint.
+        :param route_id: The ID of the route within the router.
         :type route_id: str
-        :param blueprint_name: The name of the blueprint (optional).
-        :type blueprint_name: str
+        :param router_name: The name of the router (optional).
+        :type router_name: str
         :return: The corresponding FastRouteContract instance.
         :rtype: FastRouteContract
         '''
