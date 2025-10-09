@@ -112,4 +112,3 @@ def test_fast_router_yaml_data_map(fast_router_yaml_data):
     assert fast_router.prefix == '/calc'
     assert len(fast_router.routes) == 1
     assert fast_router.routes[0].endpoint == 'calc.add'
-
