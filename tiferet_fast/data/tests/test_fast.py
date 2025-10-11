@@ -28,8 +28,9 @@ def fast_route_yaml_data():
     # Create a FastRouteYamlData instance.
     return DataObject.from_data(
         FastRouteYamlData,
+        id='add',
         endpoint='calc.add',
-        path='/calc/add',
+        path='/add',
         methods=['GET', 'POST'],
         status_code=200
     )
@@ -46,7 +47,7 @@ def fast_router_yaml_data(fast_route_yaml_data):
         FastRouterYamlData,
         name='calc',
         prefix='/calc',
-        routes={'calc.add': fast_route_yaml_data}
+        routes={'add': fast_route_yaml_data}
     )
 
 # *** tests
@@ -61,8 +62,9 @@ def test_fast_route_yaml_data_from_data(fast_route_yaml_data):
     assert isinstance(fast_route_yaml_data, FastRouteYamlData)
 
     # Assert the attributes are correctly set.
+    assert fast_route_yaml_data.id == 'add'
     assert fast_route_yaml_data.endpoint == 'calc.add'
-    assert fast_route_yaml_data.path == '/calc/add'
+    assert fast_route_yaml_data.path == '/add'
     assert fast_route_yaml_data.methods == ['GET', 'POST']
     assert fast_route_yaml_data.status_code == 200
 
@@ -73,12 +75,13 @@ def test_fast_route_yaml_data_map(fast_route_yaml_data):
     '''
 
     # Map the YAML data to a FastRoute object.
-    fast_route = fast_route_yaml_data.map(endpoint='calc.add')
+    fast_route = fast_route_yaml_data.map(id='add', endpoint='calc.add')
 
     # Assert the mapped object is valid.
     assert isinstance(fast_route, FastRoute)
+    assert fast_route.id == 'add'
     assert fast_route.endpoint == 'calc.add'
-    assert fast_route.path == '/calc/add'
+    assert fast_route.path == '/add'
     assert fast_route.methods == ['GET', 'POST']
     assert fast_route.status_code == 200
 
@@ -95,7 +98,9 @@ def test_fast_router_yaml_data_from_data(fast_router_yaml_data):
     assert fast_router_yaml_data.name == 'calc'
     assert fast_router_yaml_data.prefix == '/calc'
     assert len(fast_router_yaml_data.routes) == 1
-    assert fast_router_yaml_data.routes['calc.add'].endpoint == 'calc.add'
+    assert 'add' in fast_router_yaml_data.routes
+    assert fast_router_yaml_data.routes['add'].id == 'add'
+    assert fast_router_yaml_data.routes['add'].endpoint == 'calc.add'
 
 # ** test: fast_router_yaml_data_map
 def test_fast_router_yaml_data_map(fast_router_yaml_data):
@@ -111,4 +116,6 @@ def test_fast_router_yaml_data_map(fast_router_yaml_data):
     assert fast_router.name == 'calc'
     assert fast_router.prefix == '/calc'
     assert len(fast_router.routes) == 1
+    assert fast_router.routes[0].id == 'add'
     assert fast_router.routes[0].endpoint == 'calc.add'
+
