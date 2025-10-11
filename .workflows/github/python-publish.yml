@@ -1,4 +1,4 @@
-name: Build and Publish Tiferet fast
+name: Build and Publish Tiferet Fast
 
 on:
   release:
