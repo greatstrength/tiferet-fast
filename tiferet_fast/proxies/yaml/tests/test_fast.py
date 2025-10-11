@@ -32,8 +32,8 @@ def fast_config_file(tmp_path):
                 'calc': {
                     'prefix': '/calc',
                     'routes': {
-                        'calc.add': {
-                            'path': '/calc/add',
+                        'add': {
+                            'path': '/add',
                             'methods': ['GET', 'POST'],
                             'status_code': 200
                         }
@@ -104,12 +104,13 @@ def test_fast_yaml_proxy_get_route(fast_yaml_proxy):
     '''
 
     # Get the route.
-    route = fast_yaml_proxy.get_route(route_id='calc.add', router_name='calc')
+    route = fast_yaml_proxy.get_route(route_id='add', router_name='calc')
 
     # Check the route.
     assert isinstance(route, FastRoute)
+    assert route.id == 'add'
     assert route.endpoint == 'calc.add'
-    assert route.path == '/calc/add'
+    assert route.path == '/add'
     assert route.methods == ['GET', 'POST']
     assert route.status_code == 200
 
