@@ -117,7 +117,7 @@ class FastYamlProxy(FastApiRepository, YamlConfigurationProxy):
 
             # Search for the route within the router.
             for route in router.routes:
-                if route.endpoint == route_id:
+                if route.id == route_id:
                     return route
 
         # If not found, return None.
