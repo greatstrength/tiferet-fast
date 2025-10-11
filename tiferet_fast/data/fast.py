@@ -49,11 +49,13 @@ class FastRouteYamlData(DataObject, FastRoute):
     )
 
     # * method: map
-    def map(self, endpoint: str) -> FastRouteContract:
+    def map(self, id: str, endpoint: str) -> FastRouteContract:
         '''
         Map the data object to a FastRouteContract instance.
 
-        :param endpoint: The unique identifier of the route endpoint.
+        :param id: The unique identifier of the route.
+        :type id: str
+        :param endpoint: The name of the route endpoint.
         :type endpoint: str
         :return: A FastRouteContract instance.
         :rtype: FastRouteContract
@@ -62,6 +64,7 @@ class FastRouteYamlData(DataObject, FastRoute):
         # Map the data object to a model instance.
         return super().map(
             FastRoute,
+            id=id,
             endpoint=endpoint
         )
 
@@ -135,5 +138,9 @@ class FastRouterYamlData(DataObject, FastRouter):
         # Map each route in the routes dictionary.
         return super().map(
             FastRouter,
-            routes=[route.map(endpoint=endpoint) for endpoint, route in self.routes.items()]
+            routes=[
+                route.map(id=id, endpoint=f'{self.name}.{id}') 
+                for id, route 
+                in self.routes.items()
+            ]
         )

@@ -19,6 +19,14 @@ class FastRoute(ModelObject):
     A Fast route model.
     '''
 
+    # * attribute: id
+    id = StringType(
+        required=True,
+        metadata=dict(
+            description='The unique identifier of the route.'
+        )
+    )
+
     # * attribute: endpoint
     endpoint = StringType(
         required=True,
@@ -101,6 +109,7 @@ class FastRouter(ModelObject):
 
         route = ModelObject.new(
             FastRoute,
+            id=endpoint,
             endpoint=f'{self.name}.{endpoint}',
             path=path,
             methods=methods,

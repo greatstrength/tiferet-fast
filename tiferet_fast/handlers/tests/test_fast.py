@@ -74,8 +74,9 @@ def test_fast_api_handler_get_route(fast_api_handler, fast_repo):
     # Mock the repository response.
     mock_route = ModelObject.new(
         FastRoute,
+        id='add',
         endpoint='calc.add',
-        path='/calc/add',
+        path='/add',
         methods=['GET'],
         status_code=200
     )
