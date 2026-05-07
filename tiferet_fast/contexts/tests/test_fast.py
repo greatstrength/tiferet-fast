@@ -5,54 +5,39 @@
 # ** infra
 import pytest
 from unittest import mock
-from fastapi import FastAPI
-from fastapi.routing import APIRouter
-from tiferet import (
-    ModelObject,
-    TiferetError
-)
-
-# ** app
-from ...contexts.fast import FastApiContext
-from ...contexts.request import FastRequestContext
-from ...models.fast import (
-    FastRouter,
-    FastRoute
-)
-from ...handlers.fast import FastApiHandler
+from tiferet import TiferetError
+from tiferet.assets.exceptions import TiferetAPIError
+from tiferet.events import DomainEvent
 from tiferet.contexts.error import ErrorContext
 from tiferet.contexts.feature import FeatureContext
 from tiferet.contexts.logging import LoggingContext
 
+# ** app
+from ...contexts.fast import FastApiContext
+from ...contexts.request import FastRequestContext
+from ...domain import FastRoute, FastRouter
+
 # *** fixtures
 
-# ** fixture: fast_router
+# ** fixture: sample_route
 @pytest.fixture
-def fast_router() -> FastRouter:
+def sample_route() -> FastRoute:
     '''
-    Fixture to provide a sample FastRouter instance for testing.
+    Fixture to provide a sample FastRoute instance for testing.
     '''
 
-    # Create a FastRouter instance.
-    return ModelObject.new(
-        FastRouter,
-        name='calc',
-        prefix='/calc',
-        routes=[
-            ModelObject.new(
-                FastRoute,
-                id='add',
-                endpoint='calc.add',
-                path='/add',
-                methods=['GET', 'POST'],
-                status_code=200
-            )
-        ]
+    # Create a FastRoute instance.
+    return FastRoute(
+        id='add',
+        endpoint='calc.add',
+        path='/add',
+        methods=['GET', 'POST'],
+        status_code=200,
     )
 
 # ** fixture: fast_api_context
 @pytest.fixture
-def fast_api_context(fast_router: FastRouter) -> FastApiContext:
+def fast_api_context(sample_route: FastRoute) -> FastApiContext:
     '''
     Fixture to provide a FastApiContext instance for testing.
     '''
@@ -62,23 +47,22 @@ def fast_api_context(fast_router: FastRouter) -> FastApiContext:
 
     # Create a mock error context.
     mock_errors = mock.Mock(spec=ErrorContext)
-    mock_errors.handle_error.return_value = {'message': 'An error occurred.'}
+    mock_errors.handle_error.return_value = {
+        'error_code': 'APP_ERROR',
+        'name': 'Application Error',
+        'message': 'An error occurred.',
+    }
 
     # Create a mock logging context.
     mock_logging = mock.Mock(spec=LoggingContext)
 
-    # Create a mock FastApiHandler.
-    mock_handler = mock.Mock(spec=FastApiHandler)
-    mock_handler.get_routers.return_value = [fast_router]
-    mock_handler.get_status_code.return_value = 400
-    mock_handler.get_route.return_value = ModelObject.new(
-        FastRoute,
-        id='add',
-        endpoint='calc.add',
-        path='/add',
-        methods=['GET', 'POST'],
-        status_code=200
-    )
+    # Create a mock get_route_evt.
+    mock_get_route_evt = mock.Mock(spec=DomainEvent)
+    mock_get_route_evt.execute = mock.Mock(return_value=sample_route)
+
+    # Create a mock get_status_code_evt.
+    mock_get_status_code_evt = mock.Mock(spec=DomainEvent)
+    mock_get_status_code_evt.execute = mock.Mock(return_value=400)
 
     # Create and return the FastApiContext instance.
     return FastApiContext(
@@ -86,7 +70,8 @@ def fast_api_context(fast_router: FastRouter) -> FastApiContext:
         features=mock_features,
         errors=mock_errors,
         logging=mock_logging,
-        fast_api_handler=mock_handler
+        get_route_evt=mock_get_route_evt,
+        get_status_code_evt=mock_get_status_code_evt,
     )
 
 # *** tests
@@ -120,7 +105,7 @@ def test_fast_api_context_parse_request(fast_api_context: FastApiContext):
 # ** test: fast_api_context_handle_error
 def test_fast_api_context_handle_error(fast_api_context: FastApiContext):
     '''
-    Test the handle_error method of FastApiContext.
+    Test the handle_error method of FastApiContext with a generic exception.
 
     :param fast_api_context: A FastApiContext instance.
     :type fast_api_context: FastApiContext
@@ -129,12 +114,12 @@ def test_fast_api_context_handle_error(fast_api_context: FastApiContext):
     # Create a sample exception.
     sample_exception = Exception('Sample error')
 
-    # Call the handle_error method.
-    response, status_code = fast_api_context.handle_error(sample_exception)
+    # Call the handle_error method and expect TiferetAPIError.
+    with pytest.raises(TiferetAPIError) as exc_info:
+        fast_api_context.handle_error(sample_exception)
 
-    # Assert that the response is a tuple of (response, status_code).
-    assert isinstance(response, dict)
-    assert status_code == 500
+    # Assert the status code is 500 for non-TiferetError.
+    assert exc_info.value.status_code == 500
 
 # ** test: fast_api_context_handle_tiferet_error
 def test_fast_api_context_handle_tiferet_error(fast_api_context: FastApiContext):
@@ -151,18 +136,17 @@ def test_fast_api_context_handle_tiferet_error(fast_api_context: FastApiContext)
     # Mock the error handler to return a specific response.
     fast_api_context.errors.handle_error.return_value = {
         'error_code': 'INVALID_INPUT',
-        'text': 'Invalid input provided.'
+        'name': 'Invalid Input',
+        'message': 'Invalid input provided.',
     }
 
-    # Call the handle_error method.
-    response, status_code = fast_api_context.handle_error(sample_tiferet_error)
+    # Call the handle_error method and expect TiferetAPIError.
+    with pytest.raises(TiferetAPIError) as exc_info:
+        fast_api_context.handle_error(sample_tiferet_error)
 
-    # Assert that the response is a tuple of (response, status_code).
-    assert response == {
-        'error_code': 'INVALID_INPUT',
-        'text': 'Invalid input provided.'
-    }
-    assert status_code == 400
+    # Assert the status code is 400 (from mock get_status_code_evt).
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.error_code == 'INVALID_INPUT'
 
 # ** test: fast_api_context_handle_response
 def test_fast_api_context_handle_response(fast_api_context: FastApiContext):
@@ -189,51 +173,3 @@ def test_fast_api_context_handle_response(fast_api_context: FastApiContext):
     # Assert that the response is as expected.
     assert response == {'result_key': 'result_value'}
     assert status_code == 200
-
-# ** test: fast_api_context_build_router
-def test_fast_api_context_build_router(fast_api_context: FastApiContext, fast_router: FastRouter):
-    '''
-    Test the build_router method of FastApiContext.
-
-    :param fast_api_context: A FastApiContext instance.
-    :type fast_api_context: FastApiContext
-    :param fast_router: A FastRouter instance.
-    :type fast_router: FastRouter
-    '''
-
-    # Create a sample view function.
-    def sample_view_func():
-        return 'Sample Response'
-
-    # Build a sample router.
-    router = fast_api_context.build_router(
-        fast_router=fast_router,
-        view_func=sample_view_func
-    )
-
-    # Assert that the returned object is a FastAPI instance.
-    assert isinstance(router, APIRouter)
-    assert router.tags == ['calc']
-    assert router.prefix == '/calc'
-
-# ** test: fast_api_context_build_fast_app
-def test_fast_api_context_build_fast_app(fast_api_context: FastApiContext):
-    '''
-    Test the build_fast_app method of FastApiContext.
-
-    :param fast_api_context: A FastApiContext instance.
-    :type fast_api_context: FastApiContext
-    '''
-
-    # Create a sample view function.
-    def sample_view_func():
-        return 'Sample Response'
-
-    # Build a sample FastAPI app.
-    fast_app = fast_api_context.build_fast_app(
-        view_func=sample_view_func
-    )
-
-    # Assert that the returned object is a FastAPI instance.
-    assert isinstance(fast_api_context.fast_app, FastAPI)
-    assert fast_app.title == 'test_fast API'

@@ -4,26 +4,20 @@
 
 # ** core
 from typing import Any, Callable
-from functools import partial
 
 # ** infra
 from tiferet import TiferetError
+from tiferet.assets.exceptions import TiferetAPIError
 from tiferet.contexts import (
     AppInterfaceContext,
     FeatureContext,
     ErrorContext,
     LoggingContext
 )
-from fastapi import FastAPI
-from fastapi.routing import APIRouter
-from starlette.middleware import Middleware
-from starlette_context import context, plugins
-from starlette_context.middleware import RawContextMiddleware
+from tiferet.events import DomainEvent
 
 # ** app
 from .request import FastRequestContext
-from ..handlers import FastApiHandler
-from ..models import FastRouter
 
 # *** contexts
 
@@ -33,11 +27,11 @@ class FastApiContext(AppInterfaceContext):
     A context for managing Fast API interactions within the Tiferet framework.
     '''
 
-    # * attribute: fast_app
-    fast_app: FastAPI
+    # * attribute: get_route_handler
+    get_route_handler: Callable
 
-    # * attribute: fast_api_handler
-    fast_api_handler: FastApiHandler
+    # * attribute: get_status_code_handler
+    get_status_code_handler: Callable
 
     # * init
     def __init__(self,
@@ -45,7 +39,8 @@ class FastApiContext(AppInterfaceContext):
             features: FeatureContext,
             errors: ErrorContext,
             logging: LoggingContext,
-            fast_api_handler: FastApiHandler
+            get_route_evt: DomainEvent,
+            get_status_code_evt: DomainEvent,
         ):
         '''
         Initialize the Fast API context.
@@ -58,15 +53,18 @@ class FastApiContext(AppInterfaceContext):
         :type errors: ErrorContext
         :param logging: The logging context.
         :type logging: LoggingContext
-        :param fast_api_handler: The Fast API handler.
-        :type fast_api_handler: FastApiHandler
+        :param get_route_evt: The domain event for retrieving a route.
+        :type get_route_evt: DomainEvent
+        :param get_status_code_evt: The domain event for retrieving a status code.
+        :type get_status_code_evt: DomainEvent
         '''
 
         # Call the parent constructor.
         super().__init__(interface_id, features, errors, logging)
 
-        # Set the attributes.
-        self.fast_api_handler = fast_api_handler
+        # Set the domain event handlers.
+        self.get_route_handler = get_route_evt.execute
+        self.get_status_code_handler = get_status_code_evt.execute
 
     # * method: parse_request
     def parse_request(self, headers: dict = {}, data: dict = {}, feature_id: str = None, **kwargs) -> FastRequestContext:
@@ -89,119 +87,53 @@ class FastApiContext(AppInterfaceContext):
         return FastRequestContext(
             headers=headers,
             data=data,
-            feature_id=feature_id
+            feature_id=feature_id,
         )
 
     # * method: handle_error
-    def handle_error(self, error: Exception) -> Any:
+    def handle_error(self, error: Exception, **kwargs) -> Any:
         '''
-        Handle the error and return the response.
+        Handle the error and return the response with status code.
 
         :param error: The error to handle.
         :type error: Exception
+        :param kwargs: Additional keyword arguments.
+        :type kwargs: dict
         :return: The error response.
         :rtype: Any
         '''
 
-        # Handle the error and get the response from the parent context.
-        if not isinstance(error, TiferetError):
-            return super().handle_error(error), 500
+        # Get the status code via event if it's a TiferetError.
+        if isinstance(error, TiferetError):
+            status_code = self.get_status_code_handler(error_code=error.error_code)
+        else:
+            status_code = 500
 
-        # Get the status code by the error code on the exception.
-        status_code = self.fast_api_handler.get_status_code(error.error_code)
-        return super().handle_error(error), status_code
+        # Delegate formatting to parent (which raises TiferetAPIError).
+        try:
+            return super().handle_error(error, **kwargs)
+        except TiferetAPIError as api_error:
+            api_error.status_code = status_code
+            raise
 
     # * method: handle_response
-    def handle_response(self, request: FastRequestContext) -> Any:
+    def handle_response(self, request: FastRequestContext, **kwargs) -> Any:
         '''
         Handle the response from the request context.
 
         :param request: The request context.
-        :type request: RequestContext
-        :return: The response.
+        :type request: FastRequestContext
+        :param kwargs: Additional keyword arguments.
+        :type kwargs: dict
+        :return: The response and status code.
         :rtype: Any
         '''
 
         # Handle the response from the request context.
-        response = super().handle_response(request)
+        response = super().handle_response(request, **kwargs)
 
         # Retrieve the route by the request feature id.
-        route = self.fast_api_handler.get_route(request.feature_id)
+        route = self.get_route_handler(endpoint=request.feature_id)
 
         # Return the result with the specified status code.
         return response, route.status_code if route else 200
-
-    # * method: build_router
-    def build_router(self, fast_router: FastRouter, view_func: Callable, **kwargs) -> FastAPI:
-        '''
-        Assembles a FastAPI router from the given FastRouter model.
-
-        :param fast_router: The FastRouter model.
-        :type fast_router: FastRouter
-        :param view_func: The view function to handle requests.
-        :type view_func: Callable
-        :param kwargs: Additional keyword arguments.
-        :type kwargs: dict
-        :return: The created FastAPI router.
-        :rtype: FastAPI
-        '''
-
-        # Create a FastAPI router instance.
-        router = APIRouter(
-            prefix=fast_router.prefix,
-            tags=[fast_router.name]
-        )
-
-        # Add the routes to the router.
-        for route in fast_router.routes:
-            router.add_api_route(
-                name=route.endpoint,
-                path=route.path,
-                endpoint=partial(view_func),
-                methods=route.methods,
-                status_code=route.status_code
-            )
-
-        # Return the created router.
-        return router
-
-    # * method: build_fast_app
-    def build_fast_app(self, view_func: Callable, **kwargs) -> FastAPI:
-        '''
-        Build and return a FastAPI application instance.
-
-        :param view_func: The view function to handle requests.
-        :type view_func: Callable
-        :param kwargs: Additional keyword arguments.
-        :type kwargs: dict
-        :return: A FastAPI application instance.
-        :rtype: FastAPI
-        '''
-
-        # Create middleware for context management.
-        middleware = [
-            Middleware(
-                RawContextMiddleware, 
-                plugins=(
-                    plugins.RequestIdPlugin(), 
-                    plugins.CorrelationIdPlugin(),
-                )
-            )
-        ]
-
-        # Create the FastAPI application.
-        fast_app = FastAPI(title=f"{self.interface_id} API", middleware=middleware)
-
-        # Load the FastAPI routers.
-        routers = self.fast_api_handler.get_routers()
-
-        # Create and include the routers.
-        for router in routers:
-            fast_router = self.build_router(router, view_func=view_func, **kwargs)
-            fast_app.include_router(fast_router)
-
-        # Set the fast_app attribute.
-        self.fast_app = fast_app
-
-        # Return the FastAPI application.
-        return fast_app

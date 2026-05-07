@@ -4,10 +4,8 @@
 
 # ** infra
 import pytest
-from tiferet import (
-    ModelObject,
-    StringType
-)
+from pydantic import Field
+from tiferet.domain import DomainObject
 
 # ** app
 from ...contexts.request import FastRequestContext
@@ -92,55 +90,49 @@ def test_fast_request_context_handle_response_data(fast_request_context):
     # Check that the response is as expected.
     assert response == {'key': 'value'}
 
-# ** test: fast_request_context_handle_response_model_object
-def test_fast_request_context_handle_response_model_object(fast_request_context):
+# ** test: fast_request_context_handle_response_domain_object
+def test_fast_request_context_handle_response_domain_object(fast_request_context):
     '''
-    Test handling a response that is a ModelObject in the FastRequestContext.
+    Test handling a response that is a DomainObject in the FastRequestContext.
 
     :param fast_request_context: The FastRequestContext instance.
     :type fast_request_context: FastRequestContext
     '''
 
-    # Create a ModelObject to simulate a response.
-    class Data(ModelObject):
-        key = StringType(
-            default='default_value',
-            required=True
-        )
+    # Create a DomainObject to simulate a response.
+    class Data(DomainObject):
+        key: str = Field(default='default_value', description='A key field.')
 
-    # Set the request context result to a ModelObject.
-    fast_request_context.set_result(ModelObject.new(Data, key='value'))
+    # Set the request context result to a DomainObject.
+    fast_request_context.set_result(Data(key='value'))
 
-    # Handle the response with a ModelObject.
+    # Handle the response with a DomainObject.
     response = fast_request_context.handle_response()
 
     # Check that the response is a dictionary with expected data.
     assert isinstance(response, dict)
     assert response.get('key') == 'value'
 
-# ** test: fast_request_context_handle_response_model_list
-def test_fast_request_context_handle_response_model_list(fast_request_context):
+# ** test: fast_request_context_handle_response_domain_list
+def test_fast_request_context_handle_response_domain_list(fast_request_context):
     '''
-    Test handling a response that is a list of ModelObjects in the FastRequestContext.
+    Test handling a response that is a list of DomainObjects in the FastRequestContext.
 
     :param fast_request_context: The FastRequestContext instance.
     :type fast_request_context: FastRequestContext
     '''
 
-    # Create a ModelObject to simulate a response.
-    class Item(ModelObject):
-        name = StringType(
-            default='default_name',
-            required=True
-        )
+    # Create a DomainObject to simulate a response.
+    class Item(DomainObject):
+        name: str = Field(default='default_name', description='A name field.')
 
-    # Set the request context result to a list of ModelObjects.
+    # Set the request context result to a list of DomainObjects.
     fast_request_context.set_result([
-        ModelObject.new(Item, name='item1'),
-        ModelObject.new(Item, name='item2')
+        Item(name='item1'),
+        Item(name='item2'),
     ])
 
-    # Handle the response with a list of ModelObjects.
+    # Handle the response with a list of DomainObjects.
     response = fast_request_context.handle_response()
 
     # Check that the response is a list and contains expected data.
@@ -149,29 +141,26 @@ def test_fast_request_context_handle_response_model_list(fast_request_context):
     assert response[0].get('name') == 'item1'
     assert response[1].get('name') == 'item2'
 
-# ** test: fast_request_context_handle_response_model_dict
-def test_fast_request_context_handle_response_model_dict(fast_request_context):
+# ** test: fast_request_context_handle_response_domain_dict
+def test_fast_request_context_handle_response_domain_dict(fast_request_context):
     '''
-    Test handling a response that is a dict of ModelObjects in the FastRequestContext.
+    Test handling a response that is a dict of DomainObjects in the FastRequestContext.
 
     :param fast_request_context: The FastRequestContext instance.
     :type fast_request_context: FastRequestContext
     '''
 
-    # Create a ModelObject to simulate a response.
-    class Item(ModelObject):
-        name = StringType(
-            default='default_name',
-            required=True
-        )
+    # Create a DomainObject to simulate a response.
+    class Item(DomainObject):
+        name: str = Field(default='default_name', description='A name field.')
 
-    # Set the request context result to a dict of ModelObjects.
+    # Set the request context result to a dict of DomainObjects.
     fast_request_context.set_result({
-        'item1': ModelObject.new(Item, name='item1'),
-        'item2': ModelObject.new(Item, name='item2')
+        'item1': Item(name='item1'),
+        'item2': Item(name='item2'),
     })
 
-    # Handle the response with a dict of ModelObjects.
+    # Handle the response with a dict of DomainObjects.
     response = fast_request_context.handle_response()
 
     # Check that the response is a dict and contains expected data.
