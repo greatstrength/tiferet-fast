@@ -9,7 +9,7 @@ license = { text = "MIT" }
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "tiferet>=1.1.2",
+    "tiferet>=2.0.0b1",
     "fastapi>=0.118.0",
     "starlette-context>=0.4.0"
 ]
@@ -33,13 +33,13 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = [
     "tiferet_fast",
+    "tiferet_fast.builders",
     "tiferet_fast.contexts",
-    "tiferet_fast.contracts",
-    "tiferet_fast.data",
-    "tiferet_fast.handlers",
-    "tiferet_fast.models",
-    "tiferet_fast.proxies",
-    "tiferet_fast.proxies.yaml"
+    "tiferet_fast.domain",
+    "tiferet_fast.events",
+    "tiferet_fast.interfaces",
+    "tiferet_fast.mappers",
+    "tiferet_fast.repos"
 ]
 
 [tool.setuptools.dynamic]
