@@ -168,3 +168,73 @@ def test_fast_request_context_handle_response_domain_dict(fast_request_context):
     assert len(response) == 2
     assert response['item1'].get('name') == 'item1'
     assert response['item2'].get('name') == 'item2'
+
+# ** test: fast_request_context_set_result_data_key_domain_object
+def test_fast_request_context_set_result_data_key_domain_object(fast_request_context):
+    '''
+    Test that set_result with data_key stores the raw DomainObject without serialization.
+
+    :param fast_request_context: The FastRequestContext instance.
+    :type fast_request_context: FastRequestContext
+    '''
+
+    # Create a DomainObject to simulate an intermediate pipeline result.
+    class Device(DomainObject):
+        is_active: bool = Field(default=True, description='Whether the device is active.')
+
+    # Create a device instance.
+    device = Device(is_active=True)
+
+    # Set the result with a data_key to store the raw object.
+    fast_request_context.set_result(device, data_key='device')
+
+    # Assert the raw DomainObject is stored in data, not serialized.
+    assert fast_request_context.data['device'] is device
+    assert isinstance(fast_request_context.data['device'], Device)
+
+    # Assert the final result is not set.
+    assert fast_request_context.result is None
+
+# ** test: fast_request_context_set_result_data_key_primitive
+def test_fast_request_context_set_result_data_key_primitive(fast_request_context):
+    '''
+    Test that set_result with data_key stores a primitive value in request data.
+
+    :param fast_request_context: The FastRequestContext instance.
+    :type fast_request_context: FastRequestContext
+    '''
+
+    # Set the result with a data_key to store a primitive.
+    fast_request_context.set_result('raw_string', data_key='raw')
+
+    # Assert the primitive is stored in data.
+    assert fast_request_context.data['raw'] == 'raw_string'
+
+    # Assert the final result is not set.
+    assert fast_request_context.result is None
+
+# ** test: fast_request_context_set_result_data_key_list
+def test_fast_request_context_set_result_data_key_list(fast_request_context):
+    '''
+    Test that set_result with data_key stores a list of DomainObjects without serialization.
+
+    :param fast_request_context: The FastRequestContext instance.
+    :type fast_request_context: FastRequestContext
+    '''
+
+    # Create a DomainObject to simulate list items.
+    class Item(DomainObject):
+        name: str = Field(default='default_name', description='A name field.')
+
+    # Create a list of items.
+    items = [Item(name='item1'), Item(name='item2')]
+
+    # Set the result with a data_key to store the raw list.
+    fast_request_context.set_result(items, data_key='items')
+
+    # Assert the raw list of DomainObjects is stored in data.
+    assert fast_request_context.data['items'] is items
+    assert all(isinstance(item, Item) for item in fast_request_context.data['items'])
+
+    # Assert the final result is not set.
+    assert fast_request_context.result is None
