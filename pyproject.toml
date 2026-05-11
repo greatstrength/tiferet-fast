@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "tiferet>=2.0.0b1",
+    "tiferet-openapi>=0.1.2",
     "fastapi>=0.118.0",
     "starlette-context>=0.4.0"
 ]
@@ -34,12 +35,7 @@ where = ["."]
 include = [
     "tiferet_fast",
     "tiferet_fast.builders",
-    "tiferet_fast.contexts",
-    "tiferet_fast.domain",
-    "tiferet_fast.events",
-    "tiferet_fast.interfaces",
-    "tiferet_fast.mappers",
-    "tiferet_fast.repos"
+    "tiferet_fast.contexts"
 ]
 
 [tool.setuptools.dynamic]
