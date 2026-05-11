@@ -1,9 +1,9 @@
-"""Fast API Builder."""
+'''FastAPI Builder.'''
 
 # *** imports
 
 # ** core
-from typing import Any, Callable, List
+from typing import Callable
 from functools import partial
 
 # ** infra
@@ -13,10 +13,7 @@ from starlette.middleware import Middleware
 from starlette_context import plugins
 from starlette_context.middleware import RawContextMiddleware
 from tiferet.builders import AppBuilder
-
-# ** app
-from ..domain import FastRouter
-from ..contexts import FastApiContext
+from tiferet_openapi import ApiRouter
 
 # *** builders
 
@@ -27,12 +24,12 @@ class FastApiBuilder(AppBuilder):
     '''
 
     # * method: get_routers
-    def get_routers(self) -> List[FastRouter]:
+    def get_routers(self) -> list:
         '''
         Resolve and execute the get_routers event from the service provider.
 
-        :return: A list of FastRouter domain objects.
-        :rtype: List[FastRouter]
+        :return: A list of ApiRouter domain objects.
+        :rtype: list
         '''
 
         # Resolve the get_routers event and execute it.
@@ -40,12 +37,12 @@ class FastApiBuilder(AppBuilder):
         return get_routers_evt.execute()
 
     # * method: build_router
-    def build_router(self, fast_router: FastRouter, view_func: Callable, **kwargs) -> APIRouter:
+    def build_router(self, router: ApiRouter, view_func: Callable, **kwargs) -> APIRouter:
         '''
-        Build an APIRouter from a FastRouter domain object.
+        Build an APIRouter from an ApiRouter domain object.
 
-        :param fast_router: The FastRouter domain object.
-        :type fast_router: FastRouter
+        :param router: The ApiRouter domain object.
+        :type router: ApiRouter
         :param view_func: The view function to handle requests.
         :type view_func: Callable
         :param kwargs: Additional keyword arguments.
@@ -55,14 +52,14 @@ class FastApiBuilder(AppBuilder):
         '''
 
         # Create an APIRouter instance.
-        router = APIRouter(
-            prefix=fast_router.prefix,
-            tags=[fast_router.name],
+        api_router = APIRouter(
+            prefix=router.prefix,
+            tags=[router.name],
         )
 
-        # Add routes from the FastRouter domain object.
-        for route in fast_router.routes:
-            router.add_api_route(
+        # Add routes from the ApiRouter domain object.
+        for route in router.routes:
+            api_router.add_api_route(
                 name=route.endpoint,
                 path=route.path,
                 endpoint=partial(view_func),
@@ -71,7 +68,7 @@ class FastApiBuilder(AppBuilder):
             )
 
         # Return the configured router.
-        return router
+        return api_router
 
     # * method: build_fast_app
     def build_fast_app(self, interface_id: str, view_func: Callable, **kwargs) -> FastAPIApp:
@@ -110,8 +107,8 @@ class FastApiBuilder(AppBuilder):
 
         # Load and include routers.
         routers = self.get_routers()
-        for fast_router in routers:
-            api_router = self.build_router(fast_router, view_func=view_func, **kwargs)
+        for router in routers:
+            api_router = self.build_router(router, view_func=view_func, **kwargs)
             fast_app.include_router(api_router)
 
         # Return the assembled FastAPI application.
