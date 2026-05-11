@@ -1,14 +1,14 @@
-# AGENTS.md — Tiferet Fast (v0.2.0)
+# AGENTS.md — Tiferet Fast (v0.3.0)
 
 ## Project Overview
 
-**Tiferet Fast** is a FastAPI extension for the Tiferet Python framework, enabling high-performance asynchronous APIs grounded in Domain-Driven Design (DDD). It extends Tiferet's layered architecture with FastAPI-specific builders, contexts, domain events, and YAML-backed route configuration.
+**Tiferet Fast** is a thin FastAPI adapter for the Tiferet Python framework. Starting with v0.3, all domain objects, service interfaces, domain events, mappers, and repositories live in [tiferet-openapi](https://github.com/greatstrength/tiferet-openapi). This package provides only FastAPI-specific builder assembly and context error handling.
 
 - **Repository:** https://github.com/greatstrength/tiferet-fast
 - **Branch:** `main`
 - **Python:** ≥ 3.10
-- **Version:** `0.2.0`
-- **Dependency:** `tiferet>=2.0.0b1`
+- **Version:** `0.3.0`
+- **Dependencies:** `tiferet>=2.0.0b1`, `tiferet-openapi>=0.1.2`, `fastapi>=0.118.0`, `starlette-context>=0.4.0`
 
 ## Architecture
 
@@ -16,46 +16,40 @@
 
 ```
 tiferet_fast/
-├── builders/       # FastApiBuilder (primary entry point, aliased as FastAPI)
-├── contexts/       # FastApiContext, FastRequestContext
-├── domain/         # FastRoute, FastRouter (Pydantic v2 DomainObject)
-├── events/         # GetRouters, GetRoute, GetStatusCode (DomainEvent subclasses)
-├── interfaces/     # FastApiService (Service ABC)
-├── mappers/        # Aggregates + YAML TransferObjects for routes/routers
-├── repos/          # FastYamlRepository (YamlLoader-based FastApiService impl)
-└── __init__.py     # Version, exports (FastApiBuilder, FastAPI alias)
+├── builders/       # FastApiBuilder (extends AppBuilder, aliased as FastAPI)
+├── contexts/       # FastApiContext (extends OpenApiContext), FastRequestContext (alias)
+└── __init__.py     # Version, exports
 ```
+
+All domain-layer packages (`domain/`, `interfaces/`, `events/`, `mappers/`, `repos/`) were removed in v0.3. Consumers import directly from `tiferet_openapi`.
 
 ### Key Concepts
 
-- **FastApiBuilder** (`builders/fast.py`): Extends `tiferet.builders.AppBuilder`. Primary entry point for building FastAPI applications. Methods: `get_routers()`, `build_router()`, `build_fast_app()`, `run()`. Exported as `FastAPI` alias.
-- **FastApiContext** (`contexts/fast.py`): Extends `AppInterfaceContext`. Manages request/response lifecycle. Accepts `get_route_evt` and `get_status_code_evt` domain events. Handles error formatting via `TiferetAPIError` with HTTP status codes.
-- **FastRequestContext** (`contexts/request.py`): Extends `RequestContext`. Serializes `BaseModel` results via `model_dump()`.
-- **FastRoute / FastRouter** (`domain/fast.py`): Pydantic v2 `DomainObject` subclasses defining route and router structure.
-- **FastApiService** (`interfaces/fast.py`): `Service(ABC)` with `get_routers()`, `get_route()`, `get_status_code()`.
-- **GetRouters / GetRoute / GetStatusCode** (`events/fast.py`): `DomainEvent` subclasses injected with `FastApiService`.
-- **FastYamlRepository** (`repos/fast.py`): Implements `FastApiService` using `YamlLoader` for YAML file access and `FastRouterYamlObject` for mapping.
-- **Mappers** (`mappers/fast.py`): `FastRouteAggregate`, `FastRouterAggregate`, `FastRouteYamlObject`, `FastRouterYamlObject`.
+- **FastApiBuilder** (`builders/fast.py`): Extends `tiferet.builders.AppBuilder`. Primary entry point. Methods: `resolve_model()` (static, dynamic Pydantic model import), `get_routers()`, `build_router()` (passes Swagger metadata to FastAPI), `build_fast_app()`, `run()`.
+- **FastApiContext** (`contexts/fast.py`): Extends `OpenApiContext` (from `tiferet_openapi`). Overrides `handle_error()` to convert `TiferetAPIError` into FastAPI's `HTTPException` with proper HTTP status codes and structured error details.
+- **FastRequestContext** (`contexts/request.py`): Alias for `OpenApiRequestContext`. Serializes `BaseModel` results via `model_dump()`.
 
 ### Runtime Flow
 
 1. `FastApiBuilder()` initializes cache and service provider.
-2. `load_app_service()` loads app configuration.
-3. `load_interface(interface_id)` resolves `FastApiContext` with injected domain events.
-4. `get_routers()` resolves `get_routers_evt` from the service provider, which calls `FastYamlRepository.get_routers()`.
-5. `build_fast_app()` assembles a `FastAPI` instance with middleware and routers.
-6. At runtime, `FastApiContext.handle_error()` resolves HTTP status codes via `GetStatusCode` event, and `handle_response()` resolves route status codes via `GetRoute` event.
+2. `load_app_service(app_yaml_file='config.yml')` loads app configuration.
+3. `load_interface(interface_id)` resolves `FastApiContext` with injected domain events (`GetRouters`, `GetRoute`, `GetStatusCode` from `tiferet_openapi`).
+4. `get_routers()` resolves `get_routers_evt`, which calls `OpenApiYamlRepository.get_routers()`.
+5. `build_router()` resolves `response_model` via `resolve_model()` and passes Swagger metadata (`summary`, `description`, `tags`, `response_model`) to `add_api_route()`.
+6. `build_fast_app()` assembles a `FastAPI` instance with middleware and routers.
+7. At runtime, `FastApiContext.handle_error()` converts domain errors to `HTTPException` with status codes resolved via `GetStatusCode`, and `handle_response()` resolves route status codes via `GetRoute`.
 
 ## Configuration
 
-Applications are configured via YAML files:
+v0.3 uses the tiferet v2 beta consolidated `config.yml` strategy — a single YAML file at the project root containing all sections:
 
-- `app.yml` — Interface definitions (module_path, class_name, service dependencies)
-- `fast.yml` — FastAPI routers, routes, and error-to-status-code mappings
-- `container.yml` — Feature-level DI service configurations
-- `feature.yml` — Feature workflows (steps with service_id, parameters)
-- `error.yml` — Error definitions with multilingual messages
-- `logging.yml` — Logging formatters, handlers, loggers
+- `interfaces` — App interface definitions (module_path, class_name, service dependencies)
+- `openapi` — Routers, routes (with Swagger metadata: `summary`, `description`, `tags`, `request_model`, `response_model`), and error-to-status-code mappings
+- `services` — Feature-level DI service configurations
+- `features` — Feature workflows (steps with `service_id`, `params`)
+- `errors` — Error definitions with multilingual messages
+
+The `openapi_yaml_file` parameter in the interface config can point to the same `config.yml`.
 
 ## Testing
 
@@ -63,15 +57,15 @@ Applications are configured via YAML files:
 - **Test location:** Co-located in `<package>/tests/` directories.
 - **Run tests:** `pytest tiferet_fast/` from project root (with venv activated).
 - **Test patterns:**
-  - Domain event tests use `DomainEvent.handle()` with mocked `FastApiService`.
-  - Repository tests use `tmp_path` fixtures with real temporary YAML files.
-  - Context tests mock domain events and verify `TiferetAPIError` flow.
+  - Builder tests verify `resolve_model()` and Swagger-enriched `build_router()`.
+  - Context tests mock domain events and verify `HTTPException` flow.
+  - Request context tests verify `BaseModel` serialization.
 
 ## Structured Code Style
 
 Follows the Tiferet structured code style. See the [Tiferet AGENTS.md](https://github.com/greatstrength/tiferet) for full conventions:
 
-- `# *** <section>` — Top-level (imports, exports, builders, contexts, events, etc.)
+- `# *** <section>` — Top-level (imports, exports, builders, contexts)
 - `# ** <category>: <name>` — Mid-level (individual components)
 - `# * <component>` — Low-level (attribute, init, method)
 - RST docstrings with `:param`, `:type`, `:return`, `:rtype`.
@@ -81,16 +75,7 @@ Follows the Tiferet structured code style. See the [Tiferet AGENTS.md](https://g
 
 `tiferet_fast/__init__.py` exports:
 
+- `FastApiContext` — The FastAPI-specific API context.
+- `FastRequestContext` — Alias for `OpenApiRequestContext`.
 - `FastApiBuilder` — The primary application builder.
 - `FastAPI` — Alias for `FastApiBuilder`.
-
-## Migration from v0.1.x
-
-| v0.1.x Package | v0.2.0 Package | Key Change |
-|---|---|---|
-| `models/` | `domain/` | Pydantic v2 `DomainObject` replaces schematics `ModelObject` |
-| `contracts/` | `interfaces/` | `Service(ABC)` replaces typed contracts |
-| `data/` | `mappers/` | `Aggregate` + `TransferObject` replace `DataObject` |
-| `handlers/` | `events/` | `DomainEvent` subclasses replace handler classes |
-| `proxies/` | `repos/` | `YamlLoader` composition replaces inheritance |
-| N/A | `builders/` | New `FastApiBuilder(AppBuilder)` entry point |
