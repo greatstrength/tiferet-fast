@@ -1,0 +1,134 @@
+interfaces:
+  calc_fast_api:
+    name: Calculator FastAPI
+    description: Arithmetic operations via FastAPI with Swagger docs
+    module_path: tiferet_fast.contexts.fast
+    class_name: FastApiContext
+    attrs:
+      get_routers_evt:
+        module_path: tiferet_openapi.events.openapi
+        class_name: GetRouters
+      get_route_evt:
+        module_path: tiferet_openapi.events.openapi
+        class_name: GetRoute
+      get_status_code_evt:
+        module_path: tiferet_openapi.events.openapi
+        class_name: GetStatusCode
+      openapi_service:
+        module_path: tiferet_openapi.repos.openapi
+        class_name: OpenApiYamlRepository
+        params:
+          openapi_yaml_file: config.yml
+
+openapi:
+  routers:
+    calc:
+      prefix: /calc
+      routes:
+        add:
+          path: /add
+          methods: [POST]
+          status_code: 200
+          summary: Add two numbers
+          description: Adds two numbers and returns the result.
+          request_model: app.domain.request.TwoOperandRequest
+          response_model: app.domain.request.CalculatorResponse
+        subtract:
+          path: /subtract
+          methods: [POST]
+          status_code: 200
+          summary: Subtract two numbers
+          description: Subtracts one number from another.
+          request_model: app.domain.request.TwoOperandRequest
+          response_model: app.domain.request.CalculatorResponse
+        multiply:
+          path: /multiply
+          methods: [POST]
+          status_code: 200
+          summary: Multiply two numbers
+          description: Multiplies two numbers together.
+          request_model: app.domain.request.TwoOperandRequest
+          response_model: app.domain.request.CalculatorResponse
+        divide:
+          path: /divide
+          methods: [POST]
+          status_code: 200
+          summary: Divide two numbers
+          description: Divides one number by another.
+          request_model: app.domain.request.TwoOperandRequest
+          response_model: app.domain.request.CalculatorResponse
+        sqrt:
+          path: /sqrt
+          methods: [POST]
+          status_code: 200
+          summary: Square root
+          description: Calculates the square root of a number.
+          request_model: app.domain.request.SingleOperandRequest
+          response_model: app.domain.request.CalculatorResponse
+  errors:
+    DIVISION_BY_ZERO: 400
+    INVALID_INPUT: 422
+
+services:
+  add_number_event:
+    module_path: app.events.calc
+    class_name: AddNumber
+  subtract_number_event:
+    module_path: app.events.calc
+    class_name: SubtractNumber
+  multiply_number_event:
+    module_path: app.events.calc
+    class_name: MultiplyNumber
+  divide_number_event:
+    module_path: app.events.calc
+    class_name: DivideNumber
+  exponentiate_number_event:
+    module_path: app.events.calc
+    class_name: ExponentiateNumber
+
+errors:
+  INVALID_INPUT:
+    name: Invalid Numeric Input
+    message:
+      - lang: en_US
+        text: 'Value must be a number'
+  DIVISION_BY_ZERO:
+    name: Division By Zero
+    message:
+      - lang: en_US
+        text: 'Cannot divide by zero'
+
+features:
+  calc:
+    add:
+      name: 'Add Number'
+      description: 'Adds one number to another'
+      commands:
+        - service_id: add_number_event
+          name: Add `a` and `b`
+    subtract:
+      name: 'Subtract Number'
+      description: 'Subtracts one number from another'
+      commands:
+        - service_id: subtract_number_event
+          name: Subtract `b` from `a`
+    multiply:
+      name: 'Multiply Number'
+      description: 'Multiplies one number by another'
+      commands:
+        - service_id: multiply_number_event
+          name: Multiply `a` and `b`
+    divide:
+      name: 'Divide Number'
+      description: 'Divides one number by another'
+      commands:
+        - service_id: divide_number_event
+          name: Divide `a` by `b`
+    sqrt:
+      name: 'Square Root'
+      description: 'Calculates the square root of a number'
+      commands:
+        - service_id: exponentiate_number_event
+          name: Calculate square root of `a`
+          params:
+            b: '0.5'

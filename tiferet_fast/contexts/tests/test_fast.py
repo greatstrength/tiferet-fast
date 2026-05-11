@@ -5,6 +5,7 @@
 # ** infra
 import pytest
 from unittest import mock
+from fastapi import HTTPException
 from tiferet import TiferetError
 from tiferet.assets.exceptions import TiferetAPIError
 from tiferet.events import DomainEvent
@@ -119,8 +120,8 @@ def test_fast_api_context_handle_error(fast_api_context: FastApiContext):
     # Create a sample exception.
     sample_exception = Exception('Sample error')
 
-    # Call the handle_error method and expect TiferetAPIError.
-    with pytest.raises(TiferetAPIError) as exc_info:
+    # Call the handle_error method and expect HTTPException.
+    with pytest.raises(HTTPException) as exc_info:
         fast_api_context.handle_error(sample_exception)
 
     # Assert the status code is 500 for non-TiferetError.
@@ -145,13 +146,14 @@ def test_fast_api_context_handle_tiferet_error(fast_api_context: FastApiContext)
         'message': 'Invalid input provided.',
     }
 
-    # Call the handle_error method and expect TiferetAPIError.
-    with pytest.raises(TiferetAPIError) as exc_info:
+    # Call the handle_error method and expect HTTPException.
+    with pytest.raises(HTTPException) as exc_info:
         fast_api_context.handle_error(sample_tiferet_error)
 
     # Assert the status code is 400 (from mock get_status_code_evt).
     assert exc_info.value.status_code == 400
-    assert exc_info.value.error_code == 'INVALID_INPUT'
+    assert exc_info.value.detail['error'] == 'Invalid Input'
+    assert exc_info.value.detail['message'] == 'Invalid input provided.'
 
 # ** test: fast_api_context_handle_response
 def test_fast_api_context_handle_response(fast_api_context: FastApiContext):
