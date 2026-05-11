@@ -11,23 +11,23 @@ from tiferet.events import DomainEvent
 from tiferet.contexts.error import ErrorContext
 from tiferet.contexts.feature import FeatureContext
 from tiferet.contexts.logging import LoggingContext
+from tiferet_openapi.domain import ApiRoute
 
 # ** app
 from ...contexts.fast import FastApiContext
 from ...contexts.request import FastRequestContext
-from ...domain import FastRoute, FastRouter
 
 # *** fixtures
 
 # ** fixture: sample_route
 @pytest.fixture
-def sample_route() -> FastRoute:
+def sample_route() -> ApiRoute:
     '''
-    Fixture to provide a sample FastRoute instance for testing.
+    Fixture to provide a sample ApiRoute instance for testing.
     '''
 
-    # Create a FastRoute instance.
-    return FastRoute(
+    # Create an ApiRoute instance.
+    return ApiRoute(
         id='add',
         endpoint='calc.add',
         path='/add',
@@ -37,7 +37,7 @@ def sample_route() -> FastRoute:
 
 # ** fixture: fast_api_context
 @pytest.fixture
-def fast_api_context(sample_route: FastRoute) -> FastApiContext:
+def fast_api_context(sample_route: ApiRoute) -> FastApiContext:
     '''
     Fixture to provide a FastApiContext instance for testing.
     '''
@@ -64,6 +64,10 @@ def fast_api_context(sample_route: FastRoute) -> FastApiContext:
     mock_get_status_code_evt = mock.Mock(spec=DomainEvent)
     mock_get_status_code_evt.execute = mock.Mock(return_value=400)
 
+    # Create a mock get_routers_evt.
+    mock_get_routers_evt = mock.Mock(spec=DomainEvent)
+    mock_get_routers_evt.execute = mock.Mock(return_value=[])
+
     # Create and return the FastApiContext instance.
     return FastApiContext(
         interface_id='test_fast',
@@ -72,6 +76,7 @@ def fast_api_context(sample_route: FastRoute) -> FastApiContext:
         logging=mock_logging,
         get_route_evt=mock_get_route_evt,
         get_status_code_evt=mock_get_status_code_evt,
+        get_routers_evt=mock_get_routers_evt,
     )
 
 # *** tests
