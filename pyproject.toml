@@ -9,8 +9,7 @@ license = { text = "MIT" }
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "tiferet>=2.0.0b1",
-    "tiferet-openapi>=0.1.2",
+    "tiferet-openapi>=0.1.3",
     "fastapi>=0.118.0",
     "starlette-context>=0.4.0"
 ]
@@ -34,7 +33,7 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = [
     "tiferet_fast",
-    "tiferet_fast.builders",
+    "tiferet_fast.blueprints",
     "tiferet_fast.contexts"
 ]
 
