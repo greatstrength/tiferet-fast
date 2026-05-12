@@ -1,4 +1,4 @@
-"""Tests for FastAPI Builder."""
+"""Tests for FastAPI Blueprints."""
 
 # *** imports
 
@@ -10,7 +10,7 @@ from fastapi.routing import APIRouter
 from tiferet_openapi.domain import ApiRoute, ApiRouter
 
 # ** app
-from ..fast import FastApiBuilder
+from ..fast import resolve_model, get_routers, build_router
 
 # *** fixtures
 
@@ -88,18 +88,15 @@ def mock_view_func() -> mock.Mock:
     # Create a mock view function.
     return mock.Mock()
 
-# ** fixture: builder
+# ** fixture: mock_service_provider
 @pytest.fixture
-def builder() -> FastApiBuilder:
+def mock_service_provider() -> mock.Mock:
     '''
-    Fixture to provide a FastApiBuilder with mocked internals.
+    Fixture to provide a mock service provider.
     '''
 
-    # Create a builder with a mocked service provider.
-    builder = FastApiBuilder.__new__(FastApiBuilder)
-    builder.service_provider = mock.Mock()
-    builder.cache = mock.Mock()
-    return builder
+    # Create a mock service provider.
+    return mock.Mock()
 
 # *** tests
 
@@ -110,7 +107,7 @@ def test_resolve_model_none():
     '''
 
     # Assert None is returned for None input.
-    assert FastApiBuilder.resolve_model(None) is None
+    assert resolve_model(None) is None
 
 # ** test: resolve_model_empty_string
 def test_resolve_model_empty_string():
@@ -119,7 +116,7 @@ def test_resolve_model_empty_string():
     '''
 
     # Assert None is returned for empty string input.
-    assert FastApiBuilder.resolve_model('') is None
+    assert resolve_model('') is None
 
 # ** test: resolve_model_valid_path
 def test_resolve_model_valid_path():
@@ -129,7 +126,7 @@ def test_resolve_model_valid_path():
 
     # Resolve pydantic.BaseModel as a smoke test.
     from pydantic import BaseModel
-    result = FastApiBuilder.resolve_model('pydantic.BaseModel')
+    result = resolve_model('pydantic.BaseModel')
 
     # Assert the resolved class matches.
     assert result is BaseModel
@@ -142,7 +139,7 @@ def test_resolve_model_invalid_module():
 
     # Assert ModuleNotFoundError is raised.
     with pytest.raises(ModuleNotFoundError):
-        FastApiBuilder.resolve_model('nonexistent.module.SomeClass')
+        resolve_model('nonexistent.module.SomeClass')
 
 # ** test: resolve_model_invalid_class
 def test_resolve_model_invalid_class():
@@ -152,15 +149,35 @@ def test_resolve_model_invalid_class():
 
     # Assert AttributeError is raised.
     with pytest.raises(AttributeError):
-        FastApiBuilder.resolve_model('pydantic.NonExistentClass')
+        resolve_model('pydantic.NonExistentClass')
+
+# ** test: get_routers
+def test_get_routers(mock_service_provider: mock.Mock):
+    '''
+    Test that get_routers resolves and executes the event from the service provider.
+
+    :param mock_service_provider: A mock service provider.
+    :type mock_service_provider: mock.Mock
+    '''
+
+    # Arrange the mock to return a list of routers.
+    mock_evt = mock.Mock()
+    mock_evt.execute.return_value = ['router1', 'router2']
+    mock_service_provider.get_service.return_value = mock_evt
+
+    # Execute the blueprint function.
+    result = get_routers(mock_service_provider)
+
+    # Assert the event was resolved and executed correctly.
+    mock_service_provider.get_service.assert_called_once_with('get_routers_evt')
+    mock_evt.execute.assert_called_once()
+    assert result == ['router1', 'router2']
 
 # ** test: build_router_plain
-def test_build_router_plain(builder: FastApiBuilder, sample_router_plain: ApiRouter, mock_view_func: mock.Mock):
+def test_build_router_plain(sample_router_plain: ApiRouter, mock_view_func: mock.Mock):
     '''
     Test build_router with a plain router (no Swagger metadata).
 
-    :param builder: A FastApiBuilder instance.
-    :type builder: FastApiBuilder
     :param sample_router_plain: A sample ApiRouter without Swagger metadata.
     :type sample_router_plain: ApiRouter
     :param mock_view_func: A mock view function.
@@ -168,7 +185,7 @@ def test_build_router_plain(builder: FastApiBuilder, sample_router_plain: ApiRou
     '''
 
     # Build the router.
-    api_router = builder.build_router(sample_router_plain, view_func=mock_view_func)
+    api_router = build_router(sample_router_plain, view_func=mock_view_func)
 
     # Assert the router is configured correctly.
     assert isinstance(api_router, APIRouter)
@@ -187,12 +204,10 @@ def test_build_router_plain(builder: FastApiBuilder, sample_router_plain: ApiRou
     assert route.response_model is None
 
 # ** test: build_router_with_swagger
-def test_build_router_with_swagger(builder: FastApiBuilder, sample_router_with_swagger: ApiRouter, mock_view_func: mock.Mock):
+def test_build_router_with_swagger(sample_router_with_swagger: ApiRouter, mock_view_func: mock.Mock):
     '''
     Test build_router with Swagger metadata.
 
-    :param builder: A FastApiBuilder instance.
-    :type builder: FastApiBuilder
     :param sample_router_with_swagger: A sample ApiRouter with Swagger metadata.
     :type sample_router_with_swagger: ApiRouter
     :param mock_view_func: A mock view function.
@@ -200,7 +215,7 @@ def test_build_router_with_swagger(builder: FastApiBuilder, sample_router_with_s
     '''
 
     # Build the router.
-    api_router = builder.build_router(sample_router_with_swagger, view_func=mock_view_func)
+    api_router = build_router(sample_router_with_swagger, view_func=mock_view_func)
 
     # Assert the router is configured correctly.
     assert isinstance(api_router, APIRouter)
