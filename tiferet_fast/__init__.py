@@ -3,11 +3,11 @@
 # *** exports
 
 # ** app
-# Export the main application builder and related modules.
+# Export the main application contexts and blueprint functions.
 # Use a try-except block to avoid import errors on build systems.
 try:
     from .contexts import FastApiContext, FastRequestContext
-    from .builders import FastApiBuilder, FastApiBuilder as FastAPI
+    from .blueprints import build_fast_app, build_fast_app as FastAPI
 except Exception as e:
     import os, sys
     if not os.getenv('TIFERET_SILENT_IMPORTS'):
@@ -16,4 +16,4 @@ except Exception as e:
 
 # *** version
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
