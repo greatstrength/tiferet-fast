@@ -5,6 +5,11 @@ interfaces:
     module_path: tiferet_fast.contexts.fast
     class_name: FastApiContext
     attrs:
+      openapi_service:
+        module_path: tiferet_openapi.repos.openapi
+        class_name: OpenApiYamlRepository
+        params:
+          openapi_yaml_file: config.yml
       get_routers_evt:
         module_path: tiferet_openapi.events.openapi
         class_name: GetRouters
@@ -14,11 +19,6 @@ interfaces:
       get_status_code_evt:
         module_path: tiferet_openapi.events.openapi
         class_name: GetStatusCode
-      openapi_service:
-        module_path: tiferet_openapi.repos.openapi
-        class_name: OpenApiYamlRepository
-        params:
-          openapi_yaml_file: config.yml
 
 openapi:
   routers:

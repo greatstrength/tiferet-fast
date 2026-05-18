@@ -129,8 +129,22 @@ def build_fast_app(interface_id: str, view_func: Callable, **parameters) -> Fast
     # Resolve the interface definition.
     app_interface, default_services = resolve_interface(interface_id, **parameters)
 
-    # Realize the app interface context.
-    interface_context = realize_interface(app_interface, interface_id)
+    # Build a unified type map from both the interface and default services.
+    type_map = app_interface.get_service_type_mapping()
+    for dep in default_services:
+        type_map[dep.service_id] = dep.get_service_type()
+        type_map.update(dep.parameters)
+    type_map.update(app_interface.constants or {})
+    type_map.update(parameters)
+
+    # Separate constants and types, then create a pre-seeded provider.
+    # NOTE: Workaround for DynamicServiceProvider eager wiring — constants must
+    # be registered before the types that depend on them.
+    constants = {k: v for k, v in type_map.items() if not isinstance(v, type)}
+    service_provider = create_service_provider(**constants)
+
+    # Realize the app interface context with the pre-seeded provider.
+    interface_context = realize_interface(app_interface, interface_id, service_provider)
 
     # Create middleware.
     middleware = [
@@ -149,16 +163,7 @@ def build_fast_app(interface_id: str, view_func: Callable, **parameters) -> Fast
         middleware=middleware,
     )
 
-    # Build a service provider seeded with default service dependencies
-    # so get_routers can resolve the routers event.
-    service_provider = create_service_provider(
-        type_map={dep.service_id: dep.get_service_type() for dep in default_services},
-        **{k: v for dep in default_services for k, v in dep.parameters.items()},
-        **(app_interface.constants or {}),
-        **parameters,
-    )
-
-    # Load and include routers.
+    # Load and include routers using the same service provider.
     routers = get_routers(service_provider)
     for router in routers:
         api_router = build_router(router, view_func=view_func)
