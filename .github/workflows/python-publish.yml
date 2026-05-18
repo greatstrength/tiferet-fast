@@ -3,6 +3,10 @@ name: Build and Publish Tiferet Fast
 on:
   release:
     types: [published]
+  push:
+    tags:
+      - 'v*a*'
+      - 'v*b*'
 
 jobs:
   test:
@@ -32,7 +36,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     needs: test
-    if: github.event.release.prerelease == false
+    if: github.event_name == 'release' && github.event.release.prerelease == false
 
     steps:
       - name: Checkout code
@@ -79,7 +83,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     needs: build
-    if: github.event.release.prerelease == false
+    if: github.event_name == 'release' && github.event.release.prerelease == false
     environment: pypi
 
     permissions:
@@ -100,7 +104,7 @@ jobs:
   build-prerelease:
     runs-on: ubuntu-latest
     needs: test
-    if: github.event.release.prerelease == true
+    if: github.event_name == 'push'
 
     steps:
       - name: Checkout code
@@ -122,11 +126,11 @@ jobs:
           VERSION=$(python -c "from tiferet_fast import __version__; print(__version__)")
           echo "PACKAGE_VERSION=$VERSION" >> $GITHUB_ENV
 
-      - name: Validate version matches release tag
+      - name: Validate version matches tag
         run: |
-          RELEASE_TAG=${{ github.event.release.tag_name }}
-          if [ "$RELEASE_TAG" != "v$PACKAGE_VERSION" ]; then
-            echo "Error: Release tag ($RELEASE_TAG) does not match package version ($PACKAGE_VERSION)"
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          if [ "$TAG_NAME" != "v$PACKAGE_VERSION" ]; then
+            echo "Error: Tag ($TAG_NAME) does not match package version ($PACKAGE_VERSION)"
             exit 1
           fi
 
@@ -147,7 +151,7 @@ jobs:
   publish-prerelease:
     runs-on: ubuntu-latest
     needs: build-prerelease
-    if: github.event.release.prerelease == true
+    if: github.event_name == 'push'
     environment: pypi
 
     permissions:
