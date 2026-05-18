@@ -4,7 +4,12 @@
 
 # ** infra
 from fastapi import Request
-from tiferet_fast import FastApiBuilder
+from tiferet_fast import build_fast_app
+from tiferet.blueprints.main import (
+    resolve_interface,
+    realize_interface,
+    create_service_provider,
+)
 
 
 # *** functions
@@ -46,12 +51,19 @@ async def view_func(request: Request):
 
 # *** exec
 
-# Create the builder and load the app service from config.yml.
-builder = FastApiBuilder()
-builder.load_app_service(app_yaml_file='config.yml')
+# Resolve the interface definition and extract constants for pre-seeding.
+# NOTE: Workaround for DynamicServiceProvider eager wiring — constants must
+# be registered before the types that depend on them.
+app_interface, default_services = resolve_interface('calc_fast_api', app_yaml_file='config.yml')
+type_map = app_interface.get_service_type_mapping()
+constants = {k: v for k, v in type_map.items() if not isinstance(v, type)}
 
-# Build the FastAPI app with routers.
-fast_app = builder.run('calc_fast_api', view_func)
+# Load the app interface context with a pre-seeded service provider.
+context = realize_interface(
+    app_interface,
+    'calc_fast_api',
+    service_provider=create_service_provider(**constants),
+)
 
-# Access the context for the view function closure.
-context = builder.load_interface('calc_fast_api')
+# Build the FastAPI app with middleware and routers.
+fast_app = build_fast_app('calc_fast_api', view_func, app_yaml_file='config.yml')
