@@ -101,7 +101,7 @@ Serve with uvicorn:
 uvicorn calc_fast_api:fast_app --reload
 ```
 
-Swagger UI is available at `http://127.0.0.1:8000/docs`.
+Swagger UI is available at `http://127.0.0.1:8000/docs`. That `/docs` surface is intentional FastAPI-native generation; `get_docs_spec` is not wired.
 
 ### Example
 
