@@ -5,7 +5,7 @@
 # ** core
 import importlib
 from functools import partial
-from typing import Any, Callable, List
+from typing import Any, Callable, Dict, List
 
 # ** infra
 from fastapi import FastAPI as FastAPIApp, Request
@@ -20,6 +20,12 @@ from tiferet.contexts.cache import CacheContext
 from tiferet_openapi import ApiRouter, create_openapi_request_context
 
 # ** app
+from ..assets.context_headers import (
+    CORRELATION_ID_HEADER_CONST_KEY,
+    REQUEST_ID_HEADER_CONST_KEY,
+    apply_context_headers,
+    parse_context_header_options,
+)
 from ..assets.core import (
     APP_FLAG,
     GET_ROUTE_EVT_SERVICE_ID,
@@ -29,6 +35,43 @@ from ..assets.core import (
 from ..assets.errors import handle_tiferet_api_error
 from ..assets.view import view_func as default_view_func
 from ..contexts.fast import FastApiContext
+
+# *** functions
+
+# ** function: create_fast_request_handler
+def create_fast_request_handler(header_keys: dict) -> Callable:
+    '''
+    Build a request-construction handler that copies plugin ids onto headers.
+
+    Wraps ``create_openapi_request_context`` so Serve sees generated request
+    and correlation ids without ``FastApiContext`` importing starlette_context.
+
+    :param header_keys: The resolved header names from
+        ``parse_context_header_options``.
+    :type header_keys: dict
+    :return: A 4-arg request-construction callable.
+    :rtype: Callable
+    '''
+
+    # Return the 4-arg adapter bound to the resolved header names.
+    def handler(interface_id: str,
+            feature_id: str,
+            headers: Dict[str, str] = None,
+            data: Dict[str, Any] = None) -> Any:
+
+        # Copy plugin ids onto the inbound headers when a request cycle exists.
+        merged = apply_context_headers(headers, header_keys)
+
+        # Construct the OpenAPI request context from the merged headers.
+        return create_openapi_request_context(
+            interface_id,
+            feature_id,
+            headers=merged,
+            data=data,
+        )
+
+    # Return the closure.
+    return handler
 
 # *** blueprints
 
@@ -147,7 +190,8 @@ def build_fast_session_context(app_session: AppSession,
     :param cache: The pre-built shared cache context.
     :type cache: CacheContext
     :param create_request_handler: Optional request-construction handler;
-        defaults to create_openapi_request_context when omitted.
+        defaults to create_fast_request_handler with library header names
+        when omitted. An explicit handler is not wrapped again.
     :type create_request_handler: Callable
     :param extra_kwargs: Additional keyword arguments forwarded to the
         context constructor.
@@ -167,7 +211,9 @@ def build_fast_session_context(app_session: AppSession,
         cache,
         app_container,
         resolver,
-        create_request_handler=create_request_handler or create_openapi_request_context,
+        create_request_handler=create_request_handler or create_fast_request_handler(
+            parse_context_header_options({}),
+        ),
         response_handler=core.response_handler,
         get_route_handler=get_route_handler(resolver.get_dependency),
         get_status_code_handler=get_status_code_handler(resolver.get_dependency),
@@ -261,8 +307,15 @@ def build_fast_app(interface_id: str,
     cache = core.build_cache()
     app_session = core.get_app_session(interface_id, cache, **parameters)
 
-    # Compose the FastAPI context from the resolved app session.
-    interface_context = build_fast_session_context(app_session, cache)
+    # Parse request-context header names from the session constants.
+    header_keys = parse_context_header_options(app_session.constants)
+
+    # Compose the FastAPI context with the header-copying request adapter.
+    interface_context = build_fast_session_context(
+        app_session,
+        cache,
+        create_request_handler=create_fast_request_handler(header_keys),
+    )
 
     # Bind the built-in asset view when the consumer does not supply one.
     if view_func is None:
@@ -275,13 +328,19 @@ def build_fast_app(interface_id: str,
     else:
         bound_view = view_func
 
+    # Key both context plugins from the same parsed header names.
+    request_id_plugin = plugins.RequestIdPlugin()
+    request_id_plugin.key = header_keys[REQUEST_ID_HEADER_CONST_KEY]
+    correlation_id_plugin = plugins.CorrelationIdPlugin()
+    correlation_id_plugin.key = header_keys[CORRELATION_ID_HEADER_CONST_KEY]
+
     # Create middleware.
     middleware = [
         Middleware(
             RawContextMiddleware,
             plugins=(
-                plugins.RequestIdPlugin(),
-                plugins.CorrelationIdPlugin(),
+                request_id_plugin,
+                correlation_id_plugin,
             ),
         )
     ]
