@@ -21,7 +21,7 @@ class AddNumber(DomainEvent):
     '''
 
     # * method: execute
-    def execute(self, a: Any, b: Any, **kwargs) -> int | float:
+    def execute(self, a: Any, b: Any, **kwargs) -> dict:
         '''
         Execute the addition event.
 
@@ -29,8 +29,8 @@ class AddNumber(DomainEvent):
         :type a: Any
         :param b: The second operand.
         :type b: Any
-        :return: The sum of a and b.
-        :rtype: int | float
+        :return: The sum of a and b in the calculator response shape.
+        :rtype: dict
         '''
 
         # Verify numeric inputs.
@@ -40,8 +40,8 @@ class AddNumber(DomainEvent):
         # Add verified values.
         result = a_verified + b_verified
 
-        # Return the result.
-        return result
+        # Return the declared calculator response shape.
+        return {'result': result}
 
 
 # ** event: subtract_number
@@ -51,7 +51,7 @@ class SubtractNumber(DomainEvent):
     '''
 
     # * method: execute
-    def execute(self, a: Any, b: Any, **kwargs) -> int | float:
+    def execute(self, a: Any, b: Any, **kwargs) -> dict:
         '''
         Execute the subtraction event.
 
@@ -59,8 +59,8 @@ class SubtractNumber(DomainEvent):
         :type a: Any
         :param b: The second operand.
         :type b: Any
-        :return: The difference of a and b.
-        :rtype: int | float
+        :return: The difference of a and b in the calculator response shape.
+        :rtype: dict
         '''
 
         # Verify numeric inputs.
@@ -70,8 +70,8 @@ class SubtractNumber(DomainEvent):
         # Subtract verified values.
         result = a_verified - b_verified
 
-        # Return the result.
-        return result
+        # Return the declared calculator response shape.
+        return {'result': result}
 
 
 # ** event: multiply_number
@@ -81,7 +81,7 @@ class MultiplyNumber(DomainEvent):
     '''
 
     # * method: execute
-    def execute(self, a: Any, b: Any, **kwargs) -> int | float:
+    def execute(self, a: Any, b: Any, **kwargs) -> dict:
         '''
         Execute the multiplication event.
 
@@ -89,8 +89,8 @@ class MultiplyNumber(DomainEvent):
         :type a: Any
         :param b: The second operand.
         :type b: Any
-        :return: The product of a and b.
-        :rtype: int | float
+        :return: The product of a and b in the calculator response shape.
+        :rtype: dict
         '''
 
         # Verify numeric inputs.
@@ -100,8 +100,8 @@ class MultiplyNumber(DomainEvent):
         # Multiply verified values.
         result = a_verified * b_verified
 
-        # Return the result.
-        return result
+        # Return the declared calculator response shape.
+        return {'result': result}
 
 
 # ** event: divide_number
@@ -111,7 +111,7 @@ class DivideNumber(DomainEvent):
     '''
 
     # * method: execute
-    def execute(self, a: Any, b: Any, **kwargs) -> int | float:
+    def execute(self, a: Any, b: Any, **kwargs) -> dict:
         '''
         Execute the division event.
 
@@ -119,8 +119,8 @@ class DivideNumber(DomainEvent):
         :type a: Any
         :param b: The denominator (must be non-zero).
         :type b: Any
-        :return: The quotient of a and b.
-        :rtype: int | float
+        :return: The quotient of a and b in the calculator response shape.
+        :rtype: dict
         '''
 
         # Verify numeric inputs.
@@ -133,8 +133,8 @@ class DivideNumber(DomainEvent):
         # Divide verified values.
         result = a_verified / b_verified
 
-        # Return the result.
-        return result
+        # Return the declared calculator response shape.
+        return {'result': result}
 
 
 # ** event: exponentiate_number
@@ -144,7 +144,7 @@ class ExponentiateNumber(DomainEvent):
     '''
 
     # * method: execute
-    def execute(self, a: Any, b: Any, **kwargs) -> int | float:
+    def execute(self, a: Any, b: Any, **kwargs) -> dict:
         '''
         Execute the exponentiation event.
 
@@ -152,8 +152,8 @@ class ExponentiateNumber(DomainEvent):
         :type a: Any
         :param b: The exponent.
         :type b: Any
-        :return: The result of a raised to the power of b.
-        :rtype: int | float
+        :return: The result of a raised to the power of b in the calculator response shape.
+        :rtype: dict
         '''
 
         # Verify numeric inputs.
@@ -163,5 +163,5 @@ class ExponentiateNumber(DomainEvent):
         # Exponentiate verified values.
         result = a_verified ** b_verified
 
-        # Return the result.
-        return result
+        # Return the declared calculator response shape.
+        return {'result': result}

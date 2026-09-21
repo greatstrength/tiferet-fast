@@ -2,9 +2,9 @@
 
 ## Introduction
 
-Tiferet Fast elevates the Tiferet Python framework by enabling developers to build high-performance, asynchronous APIs using FastAPI, grounded in Domain-Driven Design (DDD) principles. Starting with v0.3, Tiferet Fast uses [tiferet-openapi](https://github.com/greatstrength/tiferet-openapi) as the shared domain backbone for route configuration, Swagger metadata, and error-to-status-code mappings — leaving only FastAPI-specific concerns in this package.
+Tiferet Fast elevates the Tiferet Python framework by enabling developers to build high-performance, asynchronous APIs using FastAPI, grounded in Domain-Driven Design (DDD) principles. It uses [tiferet-openapi](https://github.com/greatstrength/tiferet-openapi) as the shared domain backbone for route configuration, Swagger metadata, and error-to-status-code mappings — leaving only FastAPI-specific concerns in this package.
 
-In v0.4, the class-based `FastApiBuilder` is replaced by a set of composable **blueprint functions** (`build_fast_app`, `build_router`, `get_routers`, `resolve_model`), aligning with the Tiferet core blueprint pattern for a simpler, more functional API.
+Composable **blueprint functions** (`build_fast_app`, `build_fast_session_context`, `build_router`, `get_routers`, `resolve_model`) assemble a FastAPI app from a tiferet `AppSession` and tiferet-openapi's declared routers.
 
 For a deeper understanding of Tiferet's core concepts, refer to the [Tiferet documentation](https://github.com/greatstrength/tiferet).
 
@@ -13,7 +13,8 @@ For a deeper understanding of Tiferet's core concepts, refer to the [Tiferet doc
 ### Requirements
 
 - Python 3.10 or later
-- [Tiferet OpenAPI](https://github.com/greatstrength/tiferet-openapi) >= 0.1.3 (pulls in [Tiferet](https://github.com/greatstrength/tiferet) transitively)
+- [Tiferet](https://github.com/greatstrength/tiferet) >= 2.1.0
+- [Tiferet OpenAPI](https://github.com/greatstrength/tiferet-openapi) >= 1.0.0
 
 ### Installation
 
@@ -21,17 +22,19 @@ For a deeper understanding of Tiferet's core concepts, refer to the [Tiferet doc
 pip install tiferet-fast
 ```
 
-## Architecture (v0.4.0)
+## Architecture
 
-Tiferet Fast v0.4 is a thin adapter layer. Domain objects, service interfaces, domain events, mappers, and repositories all live in `tiferet-openapi`. This package provides only:
+Tiferet Fast is a thin adapter layer. Domain objects, service interfaces, domain events, mappers, and repositories all live in `tiferet-openapi`. This package provides only:
 
+- **Assets** (`tiferet_fast.assets`) — A built-in `view_func(request, context)` that unpacks a FastAPI `Request` and calls `context.run`. The view never imports `FastApiContext`.
 - **Blueprints** (`tiferet_fast.blueprints`) — Composable functions for assembling FastAPI applications from `ApiRouter`/`ApiRoute` domain objects:
-  - `build_fast_app(interface_id, view_func, **parameters)` — One-call assembly of a complete FastAPI app with middleware and routers.
+  - `build_fast_app(interface_id, view_func=None, **parameters)` — One-call assembly of a complete FastAPI app. Loads the session via `core.build_cache` / `core.get_app_session`, composes `FastApiContext` via `build_fast_session_context`, and binds the built-in view when `view_func` is omitted.
+  - `build_fast_session_context(app_session, cache, ...)` — Composes a `FastApiContext` through `core.compose_session_context`.
   - `build_router(router, view_func)` — Builds a single `APIRouter` from an `ApiRouter` domain object with Swagger metadata.
-  - `get_routers(service_provider)` — Resolves routers via the service provider.
-  - `resolve_model(model_path)` — Dynamically imports a Pydantic model class by dotted path.
+  - `get_routers(interface_context)` — Returns routers from `FastApiContext.get_routers()`.
+  - `resolve_model(model_path)` — Dynamically imports a Pydantic model class by dotted path. A bad path raises `TiferetError` with `OPENAPI_MODEL_RESOLUTION_FAILED`.
   - `FastAPI` — Alias for `build_fast_app`.
-- **Contexts** (`tiferet_fast.contexts`) — `FastApiContext` extends `OpenApiContext` with FastAPI-specific error handling (converts `TiferetAPIError` to `HTTPException`). `FastRequestContext` is an alias for `OpenApiRequestContext`.
+- **Contexts** (`tiferet_fast.contexts`) — `FastApiContext` extends `OpenApiSessionContext` with FastAPI-specific error handling (converts `TiferetAPIError` to `HTTPException`). `FastRequestContext` is an alias for `OpenApiRequestContext`.
 
 All domain-layer concerns (routes, routers, request/response models, events, repos) are imported directly from `tiferet_openapi`.
 
@@ -42,13 +45,11 @@ All domain-layer concerns (routes, routers, request/response models, events, rep
 Tiferet v2 beta supports a consolidated `config.yml` at the project root:
 
 ```yaml
-interfaces:
+sessions:
   calc_fast_api:
     name: Calculator FastAPI
     description: Arithmetic operations via FastAPI with Swagger docs
-    module_path: tiferet_fast.contexts.fast
-    class_name: FastApiContext
-    attrs:
+    services:
       get_routers_evt:
         module_path: tiferet_openapi.events.openapi
         class_name: GetRouters
@@ -87,29 +88,11 @@ Routes support Swagger metadata fields (`summary`, `description`, `tags`, `reque
 ### Building and Running the API
 
 ```python
-from fastapi import Request
-from tiferet_fast import FastAPI, FastApiContext
-from tiferet_openapi.blueprints.main import realize_interface, resolve_interface
+from tiferet_fast import FastAPI
 
-# Define the view function.
-async def view_func(request: Request):
-    data = await request.json() if request.headers.get('content-type') == 'application/json' else {}
-    data.update(dict(request.query_params))
-    headers = dict(request.headers)
-
-    response, status_code = context.run(
-        feature_id=request.scope['route'].name,
-        headers=headers,
-        data=data,
-    )
-    return {'result': response}
-
-# Build the FastAPI application in one call.
-fast_app = FastAPI('calc_fast_api', view_func, app_yaml_file='config.yml')
-
-# Realize the context for the view function closure.
-app_interface, _ = resolve_interface('calc_fast_api', app_yaml_file='config.yml')
-context = realize_interface(app_interface, 'calc_fast_api')
+# Build the FastAPI application in one call. The built-in view is used when
+# view_func is omitted; pass an optional request-only view to override it.
+fast_app = FastAPI('calc_fast_api', app_config='config.yml')
 ```
 
 Serve with uvicorn:
@@ -124,33 +107,14 @@ Swagger UI is available at `http://127.0.0.1:8000/docs`.
 
 See the [`example/`](example/) directory for a complete calculator application demonstrating all features.
 
-## Migration from v0.3.x
+## Migration from v0.3.x / v0.4.x
 
-v0.4.0 replaces the class-based `FastApiBuilder` with composable blueprint functions:
-
-- **`FastApiBuilder` class** — Removed. Use `build_fast_app()` (or its alias `FastAPI`) from `tiferet_fast.blueprints`.
-- **`FastApiBuilder().load_app_service()`** — No longer needed. Pass `app_yaml_file` as a keyword argument to `build_fast_app()`.
-- **`FastApiBuilder().run(interface_id, view_func)`** — Replace with `build_fast_app(interface_id, view_func, app_yaml_file='config.yml')`.
-- **`FastApiBuilder().load_interface(interface_id)`** — Use `resolve_interface()` and `realize_interface()` from `tiferet_openapi.blueprints.main`.
-- **Direct `tiferet` dependency** — Removed from `pyproject.toml`. Tiferet is now pulled in transitively via `tiferet-openapi>=0.1.3`.
-
-### Before (v0.3.x)
-
-```python
-from tiferet_fast import FastApiBuilder
-
-builder = FastApiBuilder()
-builder.load_app_service(app_yaml_file='config.yml')
-fast_app = builder.run('calc_fast_api', view_func)
-context = builder.load_interface('calc_fast_api')
-```
-
-### After (v0.4.0)
+The class-based `FastApiBuilder` was replaced by composable blueprint functions. Session composition now goes through tiferet 2.1.0 (`core.build_cache` / `core.get_app_session` / `build_fast_session_context`). A consumer `view_func` is optional; omit it to use the built-in asset view.
 
 ```python
 from tiferet_fast import FastAPI
 
-fast_app = FastAPI('calc_fast_api', view_func, app_yaml_file='config.yml')
+fast_app = FastAPI('calc_fast_api', app_config='config.yml')
 ```
 
 ## Migration from v0.2.x
@@ -163,7 +127,7 @@ v0.3.0 removed all domain/interface/event/mapper/repo layers from this package i
 - **`tiferet_fast.mappers`** — Removed. Use `tiferet_openapi.mappers`.
 - **`tiferet_fast.repos`** — Removed. Use `tiferet_openapi.repos` (`OpenApiYamlRepository`).
 - **`fast.yml`** config with `fast:` root key — Replaced by `openapi.yml` or consolidated `config.yml` with `openapi:` root key.
-- **`FastApiContext`** — Now extends `OpenApiContext` (from `tiferet_openapi`) with `handle_error()` converting `TiferetAPIError` to `HTTPException`.
+- **`FastApiContext`** — Extends `OpenApiSessionContext` (from `tiferet_openapi`) with `handle_error()` converting `TiferetAPIError` to `HTTPException`.
 - **`FastRequestContext`** — Now an alias for `OpenApiRequestContext`.
 
 ## License

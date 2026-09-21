@@ -1,6 +1,6 @@
 # Calculator FastAPI Example
 
-A self-contained calculator API demonstrating the Tiferet Fast v0.3 architecture: domain events, YAML-driven configuration, OpenAPI route metadata, and native Swagger UI via FastAPI.
+A self-contained calculator API demonstrating Tiferet Fast: domain events, YAML-driven configuration, OpenAPI route metadata, and native Swagger UI via FastAPI.
 
 ## Prerequisites
 
@@ -127,7 +127,7 @@ example/
 
 This example uses the v2 beta consolidated `config.yml` strategy — a single YAML file at the project root containing all configuration sections:
 
-- **`interfaces`** — App interface definition pointing to `FastApiContext`
+- **`sessions`** — App session definition wiring OpenAPI events and the OpenAPI repository
 - **`openapi`** — Router/route definitions with Swagger metadata (`summary`, `description`, `request_model`, `response_model`) and error-to-status-code mappings
 - **`services`** — DI container mappings for domain events
 - **`errors`** — Structured error definitions with multilingual support
