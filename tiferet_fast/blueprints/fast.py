@@ -13,7 +13,7 @@ from fastapi.routing import APIRouter
 from starlette.middleware import Middleware
 from starlette_context import plugins
 from starlette_context.middleware import RawContextMiddleware
-from tiferet import TiferetError
+from tiferet import TiferetAPIError, TiferetError
 from tiferet.blueprints import core
 from tiferet.contexts.app import AppSession
 from tiferet.contexts.cache import CacheContext
@@ -26,6 +26,7 @@ from ..assets.core import (
     GET_ROUTERS_EVT_SERVICE_ID,
     GET_STATUS_CODE_EVT_SERVICE_ID,
 )
+from ..assets.errors import handle_tiferet_api_error
 from ..assets.view import view_func as default_view_func
 from ..contexts.fast import FastApiContext
 
@@ -139,7 +140,7 @@ def build_fast_session_context(app_session: AppSession,
 
     Parallel to tiferet_openapi.blueprints.openapi.build_openapi_session_context,
     but realizes FastApiContext directly so FastAPI-specific methods such as
-    get_routers and handle_error remain available on the composed context.
+    get_routers remain available on the composed context.
 
     :param app_session: The resolved app session definition.
     :type app_session: AppSession
@@ -242,8 +243,8 @@ def build_fast_app(interface_id: str,
 
     Loads the app session via core.build_cache/core.get_app_session, composes
     the FastApiContext via build_fast_session_context, binds the built-in view
-    when view_func is omitted, and includes one FastAPI router per declared
-    ApiRouter.
+    when view_func is omitted, registers handle_tiferet_api_error once, and
+    includes one FastAPI router per declared ApiRouter.
 
     :param interface_id: The interface ID to load.
     :type interface_id: str
@@ -290,6 +291,10 @@ def build_fast_app(interface_id: str,
         title=f'{interface_id} API',
         middleware=middleware,
     )
+
+    # Register the TiferetAPIError handler so uncaught catalogued errors
+    # surface as ApiErrorResponse JSON instead of FastAPI's default 500.
+    fast_app.add_exception_handler(TiferetAPIError, handle_tiferet_api_error)
 
     # Load and include routers using the composed context.
     routers = get_routers(interface_context)

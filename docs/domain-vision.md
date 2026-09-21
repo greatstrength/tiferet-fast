@@ -6,17 +6,17 @@
 
 tiferet-openapi lets a Tiferet application declare its routes, request/response shapes, and error mappings once, in configuration, and derive a working router, a generated specification, and documentation data from that single declaration. That bet is only real if a team can actually pick FastAPI and get all of it — for free, without writing FastAPI-specific routing or error-translation code by hand, and without that adapter silently falling behind the shared layer it sits on.
 
-tiferet-fast's bet is that "pick FastAPI" should cost a team nothing more than choosing which framework runs underneath. Wiring a declared router into `fastapi.APIRouter.add_api_route`, translating a domain error into an `HTTPException` FastAPI understands, and assembling a runnable `FastAPI` app from an interface ID are FastAPI's own idioms — not places where the shared declaration's promises should have to be re-earned per framework.
+tiferet-fast's bet is that "pick FastAPI" should cost a team nothing more than choosing which framework runs underneath. Wiring a declared router into `fastapi.APIRouter.add_api_route`, translating a domain error into `ApiErrorResponse` JSON at the FastAPI exception-handler boundary, and assembling a runnable `FastAPI` app from an interface ID are FastAPI's own idioms — not places where the shared declaration's promises should have to be re-earned per framework.
 
 ## What this domain makes real
 
-tiferet-fast is the thin FastAPI-specific adapter over tiferet-openapi's shared declaration. Given an interface ID, a view function, and a `config.yml`, it resolves the declared routers and routes, builds a real `fastapi.APIRouter` per router (Swagger metadata included) via `add_api_route`, assembles a runnable `FastAPI` application with request-context middleware, and converts a domain-level `TiferetAPIError` into a FastAPI `HTTPException` at the moment an error crosses back out to a client — all without a person writing FastAPI routing code for each new route.
+tiferet-fast is the thin FastAPI-specific adapter over tiferet-openapi's shared declaration. Given an interface ID, a view function, and a `config.yml`, it resolves the declared routers and routes, builds a real `fastapi.APIRouter` per router (Swagger metadata included) via `add_api_route`, assembles a runnable `FastAPI` application with request-context middleware, and converts a domain-level `TiferetAPIError` into `ApiErrorResponse` JSON at the FastAPI exception-handler boundary — all without a person writing FastAPI routing code for each new route.
 
 ## What we get for it
 
 **One call to a running app.** `build_fast_app(interface_id, view_func, **parameters)` — or its `FastAPI` alias — resolves the interface, seeds a service provider, and returns a fully wired `FastAPI` instance with routers included. A consuming application supplies a `config.yml` and a view function; it does not hand-assemble `APIRouter`s itself.
 
-**FastAPI-native errors, not raw domain exceptions leaking through.** `FastApiContext.handle_error` delegates to the shared context for status-code resolution and error formatting, then re-raises the result as an `HTTPException` — the shape FastAPI's own exception handling, and any client calling the API, already expects.
+**Structured API errors, not FastAPI's `{"detail": ...}` envelope.** `handle_tiferet_api_error`, registered once on the assembled FastAPI app, maps a raised `TiferetAPIError` onto `ApiErrorResponse` `{error, message}` JSON. Status-code resolution stays on the inherited OpenAPI session hub; the context does not raise `HTTPException`.
 
 **Swagger metadata is data, not code.** `build_router` reads `summary`, `description`, `tags`, and `response_model` straight off each declared `ApiRoute` and hands them to `add_api_route`. A route's documentation text is edited in `config.yml`, not in a `tiferet_fast` source file.
 
@@ -24,7 +24,7 @@ tiferet-fast is the thin FastAPI-specific adapter over tiferet-openapi's shared 
 
 Every request tiferet-fast serves goes through the same short path:
 
-> **Resolve** the interface and pre-seed a service provider from its declared constants → **assemble** a `FastAPI` app by building one `APIRouter` per declared `ApiRouter` → **serve** each request through the caller-supplied `view_func`, which asks the realized context to run the matching feature → **translate** any error the context raises into an `HTTPException` before it reaches the client.
+> **Resolve** the interface and pre-seed a service provider from its declared constants → **assemble** a `FastAPI` app by building one `APIRouter` per declared `ApiRouter` → **serve** each request through the caller-supplied `view_func`, which asks the realized context to run the matching feature → **translate** any `TiferetAPIError` the context raises into `ApiErrorResponse` JSON before it reaches the client.
 
 The commitment underneath all four steps: tiferet-fast introduces no second declaration and no domain logic of its own. Every fact about what a route looks like — path, methods, status code, documentation — is read from the `ApiRoute`/`ApiRouter` objects tiferet-openapi already produced from the same `config.yml`. This domain's job is narrowly to hand FastAPI what it needs to run and document those routes, not to decide what they are.
 

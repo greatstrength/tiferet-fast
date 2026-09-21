@@ -24,7 +24,7 @@ and one axis of variation the codebase does not currently name for itself:
 1. **Consumed-vs-current base shape** — whether the class tiferet-fast subclasses, the compose path it uses to realize that class, and the dependency floors it declares, match `tiferet-openapi v1.0.0` and `tiferet v2.1.0`. This is not a designed axis; it is where `FastApiContext` and `build_fast_app` have fallen behind both floors (Section 5.2, Section 5.4, Section 8).
 
 ## 3. Ubiquitous language
-**`FastApiContext`** (`tiferet_fast/contexts/fast.py`) — the FastAPI-specific runtime context. Declared as `class FastApiContext(OpenApiContext)`. Overrides only `handle_error`: it calls `super().handle_error(error, **kwargs)`, catches the `TiferetAPIError` the base raises, and re-raises it as a `fastapi.HTTPException` carrying `status_code` and a `{'error', 'message'}` detail body. Its tests still construct it with retired `AppInterfaceContext` kwargs (`interface_id`, `features`, `errors`, `logging`, `get_route_evt`, …) and still call `parse_request` / `handle_response` — neither of which exists on `OpenApiSessionContext` in tiferet-openapi v1.0.0 (Section 5.2).
+**`FastApiContext`** (`tiferet_fast/contexts/fast.py`) — the FastAPI-specific runtime context. Declared as `class FastApiContext(OpenApiContext)`. It does not override `handle_error`; the inherited hub still raises `TiferetAPIError` with `.status_code` attached, and Translate is `handle_tiferet_api_error` registered once on the assembled FastAPI app, returning `ApiErrorResponse` JSON. Its tests still construct it with retired `AppInterfaceContext` kwargs (`interface_id`, `features`, `errors`, `logging`, `get_route_evt`, …) and still call `parse_request` / `handle_response` — neither of which exists on `OpenApiSessionContext` in tiferet-openapi v1.0.0 (Section 5.2).
 
 **`FastRequestContext`** (`tiferet_fast/contexts/request.py`) — `FastRequestContext = OpenApiRequestContext`, a direct alias with no FastAPI-specific behavior added.
 
@@ -63,11 +63,11 @@ The break is more than a class rename. On v1.0.0, `OpenApiSessionContext.__init_
 This remains masked in the local dev environment: the installed `tiferet-openapi==1.0.0b1` wheel in `tiferet-fast/.venv` still exports `OpenApiContext` and predates both the rename and the handler-callable constructor, despite sharing a version string with an earlier proto tag. Local tests pass against that stale build, not against GitHub Latest `v1.0.0`. Reinstalling against the published `tiferet-openapi==1.0.0` (and `tiferet>=2.1.0`) should be the first thing a future RFP session confirms before trusting green tests here.
 
 ### 5.3 Handling errors
-*Convert whatever the base context raises into a FastAPI-native `HTTPException`.*
+*Convert a raised `TiferetAPIError` into `ApiErrorResponse` JSON at the FastAPI boundary.*
 
-`FastApiContext.handle_error` (`tiferet_fast/contexts/fast.py:22-43`) calls `super().handle_error(error, **kwargs)`, catches `TiferetAPIError`, and raises `HTTPException(status_code=api_error.status_code, detail={'error': api_error.name, 'message': api_error.message})`.
+`handle_tiferet_api_error` (`tiferet_fast/assets/errors.py`) is a named Starlette `ExceptionHandler` of shape `(request, exc)`. It builds `ApiErrorResponse(error=exc.name, message=exc.message or '')` and returns `JSONResponse(content=payload.model_dump(), status_code=getattr(exc, 'status_code', 500))`. `build_fast_app` registers it once with `fast_app.add_exception_handler(TiferetAPIError, handle_tiferet_api_error)`. `FastApiContext` does not override `handle_error`; the inherited `OpenApiSessionContext.handle_error` still raises `TiferetAPIError` with `.status_code` attached. View functions do not catch the error. The handler does not raise `HTTPException`; FastAPI's default `{"detail": ...}` envelope is not the client body.
 
-**Verdict:** this method's logic is sound and framework-idiomatic on its own terms — the only defect is Section 5.2's import target, which this method inherits from at the class-declaration level.
+**Verdict:** Translate belongs at the FastAPI app-level exception handler, not on the session hub. Status resolution stays upstream. The previous "HTTPException conversion is sound" verdict is no longer true: that conversion wrapped `{error, message}` in FastAPI's `{"detail": ...}` envelope and put FastAPI types inside the context.
 
 ### 5.4 Assembling the app
 *Resolve an interface, pre-seed a service provider, and assemble a runnable `FastAPI` app with middleware and routers.*
@@ -84,7 +84,7 @@ It is not. `build_fast_app` constructs `FastAPIApp(title=f'{interface_id} API', 
 **Verdict:** variable by construction, same as tiferet-openapi's own Section 5.4/8 already state — but here, "which renderer the adapter picks" currently means "none; defer entirely to FastAPI's native generation from route kwargs." This is a live design decision this discovery surfaces rather than a bug: a future RFP needs to decide whether that is the intended permanent shape (FastAPI's native generation is authoritative, and `generate_spec`/`get_docs_spec` are simply unused by this adapter) or whether tiferet-fast should route a docs endpoint through `get_docs_spec` the way its own architecture docs (`AGENTS.md`/`README.md`) imply it eventually should.
 
 ## 6. How the behaviors compose
-Resolve runs once, at app-build time. Assemble runs once per declared router, also at app-build time, and depends on Resolve. Serve runs once per incoming request, driven entirely by the caller-supplied `view_func`, and depends on Assemble having registered the matching route. Translate is a parallel error path that only fires when the realized context's `run` path raises.
+Resolve runs once, at app-build time. Assemble runs once per declared router, also at app-build time, and depends on Resolve. Serve runs once per incoming request, driven entirely by the caller-supplied `view_func`, and depends on Assemble having registered the matching route. Translate is a parallel error path that only fires when the realized context's `run` path raises `TiferetAPIError`; `handle_tiferet_api_error` on the assembled FastAPI app renders `ApiErrorResponse` JSON.
 
 ```mermaid
 flowchart LR
@@ -92,9 +92,9 @@ flowchart LR
   RESOLVE --> ASSEMBLE["5.1 / 5.4 Assemble<br/>build_router / build_fast_app"]
   ASSEMBLE --> SERVE["Serve<br/>caller view_func → context.run"]
   SERVE --> ERR{"error raised?"}
-  ERR -- yes --> TRANSLATE["5.3 Translate<br/>FastApiContext.handle_error"]
+  ERR -- yes --> TRANSLATE["5.3 Translate<br/>handle_tiferet_api_error"]
   ERR -- no --> RESP([HTTP response])
-  TRANSLATE --> HTTPEXC([HTTPException])
+  TRANSLATE --> JSON([ApiErrorResponse JSON])
 ```
 
 Today's code still draws Resolve through `tiferet.blueprints.main` (Section 5.4); the diagram names the intended v2.1.0 path. Publish (Section 5.5) is absent because nothing in the current codebase triggers it.
@@ -105,7 +105,7 @@ Today's code still draws Resolve through `tiferet.blueprints.main` (Section 5.4)
 ## 8. The agnostic core and the variable edge
 **Agnostic — built once, shared regardless of which interface or config is loaded:**
 - `build_router`'s translation of `ApiRoute`/`ApiRouter` fields into `add_api_route` keyword arguments.
-- `FastApiContext.handle_error`'s translation of a resolved status code + `TiferetAPIError` into `HTTPException`.
+- `handle_tiferet_api_error`'s translation of a raised `TiferetAPIError` into `ApiErrorResponse` JSON, registered once on the assembled FastAPI app.
 
 **Variable — one definition per consuming application:**
 - The `config.yml` content itself (routers, routes, services, features, errors).
@@ -121,7 +121,7 @@ Today's code still draws Resolve through `tiferet.blueprints.main` (Section 5.4)
 - **Declared floors are behind the beta this document now grounds against.** `pyproject.toml` still has `tiferet-openapi>=1.0.0b1` and no direct `tiferet` pin; `requirements.txt` still has `tiferet>=2.0.0b1`; `AGENTS.md`/`README.md` still describe `v0.4.0` / `tiferet-openapi>=0.1.3` / `FastApiContext(OpenApiContext)`. The beta floors this refresh names are `tiferet-openapi>=1.0.0` and `tiferet>=2.1.0` (last minor — not the unreleased `tiferet>=2.1.1` bump on tiferet-openapi `main` after v1.0.0).
 
 ## 9. Boundaries
-**Inside the domain:** assembling FastAPI routers and a runnable `FastAPI` app from tiferet-openapi's already-declared routers/routes; realizing the FastAPI session context through tiferet / tiferet-openapi composition; translating a domain error into an `HTTPException`.
+**Inside the domain:** assembling FastAPI routers and a runnable `FastAPI` app from tiferet-openapi's already-declared routers/routes; realizing the FastAPI session context through tiferet / tiferet-openapi composition; translating a raised `TiferetAPIError` into `ApiErrorResponse` JSON via the app-level exception handler.
 
 **Outside the domain, and who owns it instead:**
 - Declaring routes, request/response shapes, and error mappings — owned entirely by `tiferet-openapi` (`ApiRoute`, `ApiRouter`, `OpenApiYamlRepository`, the three domain events).
