@@ -7,10 +7,27 @@ import pytest
 from unittest import mock
 from functools import partial
 from fastapi.routing import APIRouter
+from starlette_context import plugins, request_cycle_context
+from starlette_context.middleware import RawContextMiddleware
+from tiferet_openapi.contexts.request import OpenApiRequestContext
 from tiferet_openapi.domain import ApiRoute, ApiRouter
 
 # ** app
-from ..fast import resolve_model, get_routers, build_router
+from ...assets.context_headers import (
+    CORRELATION_ID_HEADER_CONST_KEY,
+    DEFAULT_CORRELATION_ID_HEADER,
+    DEFAULT_REQUEST_ID_HEADER,
+    REQUEST_ID_HEADER_CONST_KEY,
+    parse_context_header_options,
+)
+from ..fast import (
+    build_fast_app,
+    build_fast_session_context,
+    build_router,
+    create_fast_request_handler,
+    get_routers,
+    resolve_model,
+)
 
 # *** fixtures
 
@@ -231,3 +248,153 @@ def test_build_router_with_swagger(sample_router_with_swagger: ApiRouter, mock_v
     # Assert the response model is resolved.
     from pydantic import BaseModel
     assert route.response_model is BaseModel
+
+# ** test: create_fast_request_handler_copies_context_headers
+def test_create_fast_request_handler_copies_context_headers():
+    '''
+    Test that the adapter copies plugin ids onto OpenApiRequestContext headers
+    without setting session_id from the HTTP request id.
+    '''
+
+    # Build the adapter with library default header names.
+    header_keys = parse_context_header_options({})
+    handler = create_fast_request_handler(header_keys)
+    request_id = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    correlation_id = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+
+    # Construct a request inside a request-cycle context.
+    with request_cycle_context({
+        DEFAULT_REQUEST_ID_HEADER: request_id,
+        DEFAULT_CORRELATION_ID_HEADER: correlation_id,
+    }):
+        request_context = handler(
+            'calc_fast_api',
+            'calc.add',
+            {'content-type': 'application/json'},
+            {'a': 1},
+        )
+
+    # Assert the constructed type remains OpenApiRequestContext.
+    assert isinstance(request_context, OpenApiRequestContext)
+    assert request_context.headers[DEFAULT_REQUEST_ID_HEADER] == request_id
+    assert request_context.headers[DEFAULT_CORRELATION_ID_HEADER] == correlation_id
+    assert request_context.headers['interface_id'] == 'calc_fast_api'
+    assert request_context.feature_id == 'calc.add'
+    assert request_context.data == {'a': 1}
+
+    # Assert session_id is derived separately and is not the HTTP request id.
+    assert 'session_id' not in request_context.headers
+    assert request_context.session_id != request_id
+    assert '-' in request_context.session_id
+
+# ** test: create_fast_request_handler_without_request_cycle
+def test_create_fast_request_handler_without_request_cycle():
+    '''
+    Test that the adapter still constructs OpenApiRequestContext outside HTTP.
+    '''
+
+    # Construct a request with no starlette_context request cycle.
+    handler = create_fast_request_handler(parse_context_header_options({}))
+    request_context = handler('calc_fast_api', 'calc.add', {}, {})
+
+    # Assert construction succeeds and plugin ids are not invented.
+    assert isinstance(request_context, OpenApiRequestContext)
+    assert DEFAULT_REQUEST_ID_HEADER not in request_context.headers
+    assert request_context.headers['interface_id'] == 'calc_fast_api'
+    assert request_context.session_id
+
+# ** test: build_fast_session_context_default_handler_copies_headers
+@mock.patch('tiferet_fast.blueprints.fast.core.compose_session_context')
+@mock.patch('tiferet_fast.blueprints.fast.core.build_service_resolver')
+@mock.patch('tiferet_fast.blueprints.fast.core.build_app_service_container')
+def test_build_fast_session_context_default_handler_copies_headers(
+        mock_build_container: mock.Mock,
+        mock_build_resolver: mock.Mock,
+        mock_compose: mock.Mock):
+    '''
+    Test that omitting create_request_handler defaults to the header adapter.
+    '''
+
+    # Compose a session context without an explicit request handler.
+    build_fast_session_context(mock.Mock(), mock.Mock())
+    handler = mock_compose.call_args.kwargs['create_request_handler']
+    request_id = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+
+    # Exercise the default handler inside a request cycle.
+    with request_cycle_context({
+        DEFAULT_REQUEST_ID_HEADER: request_id,
+        DEFAULT_CORRELATION_ID_HEADER: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    }):
+        request_context = handler('calc_fast_api', 'calc.add', {}, {})
+
+    # Assert the default handler copied plugin ids and left session_id alone.
+    assert isinstance(request_context, OpenApiRequestContext)
+    assert request_context.headers[DEFAULT_REQUEST_ID_HEADER] == request_id
+    assert request_context.session_id != request_id
+
+# ** test: build_fast_session_context_does_not_wrap_explicit_handler
+@mock.patch('tiferet_fast.blueprints.fast.core.compose_session_context')
+@mock.patch('tiferet_fast.blueprints.fast.core.build_service_resolver')
+@mock.patch('tiferet_fast.blueprints.fast.core.build_app_service_container')
+def test_build_fast_session_context_does_not_wrap_explicit_handler(
+        mock_build_container: mock.Mock,
+        mock_build_resolver: mock.Mock,
+        mock_compose: mock.Mock):
+    '''
+    Test that an explicit create_request_handler is not wrapped again.
+    '''
+
+    # Compose a session context with a caller-supplied request handler.
+    explicit_handler = mock.Mock(name='explicit_handler')
+    build_fast_session_context(
+        mock.Mock(),
+        mock.Mock(),
+        create_request_handler=explicit_handler,
+    )
+
+    # Assert the explicit handler is passed through unchanged.
+    assert mock_compose.call_args.kwargs['create_request_handler'] is explicit_handler
+
+# ** test: build_fast_app_mounts_keyed_middleware_and_adapter
+@mock.patch('tiferet_fast.blueprints.fast.get_routers', return_value=[])
+@mock.patch('tiferet_fast.blueprints.fast.build_fast_session_context')
+@mock.patch('tiferet_fast.blueprints.fast.core.get_app_session')
+@mock.patch('tiferet_fast.blueprints.fast.core.build_cache')
+def test_build_fast_app_mounts_keyed_middleware_and_adapter(
+        mock_build_cache: mock.Mock,
+        mock_get_app_session: mock.Mock,
+        mock_build_session_context: mock.Mock,
+        mock_get_routers: mock.Mock):
+    '''
+    Test that build_fast_app keys both plugins and passes the header adapter.
+    '''
+
+    # Assemble an app whose session overrides both closed header names.
+    app_session = mock.Mock()
+    app_session.constants = {
+        REQUEST_ID_HEADER_CONST_KEY: 'X-Custom-Request-ID',
+        CORRELATION_ID_HEADER_CONST_KEY: 'X-Custom-Correlation-ID',
+    }
+    mock_get_app_session.return_value = app_session
+    fast_app = build_fast_app('calc_fast_api')
+
+    # Assert both plugins are mounted and keyed from the parsed names.
+    middleware = fast_app.user_middleware[0]
+    assert middleware.cls is RawContextMiddleware
+    mounted_plugins = middleware.kwargs['plugins']
+    assert isinstance(mounted_plugins[0], plugins.RequestIdPlugin)
+    assert isinstance(mounted_plugins[1], plugins.CorrelationIdPlugin)
+    assert mounted_plugins[0].key == 'X-Custom-Request-ID'
+    assert mounted_plugins[1].key == 'X-Custom-Correlation-ID'
+
+    # Assert the composed session received the header-copying request adapter.
+    passed_handler = mock_build_session_context.call_args.kwargs['create_request_handler']
+    with request_cycle_context({
+        'X-Custom-Request-ID': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        'X-Custom-Correlation-ID': 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    }):
+        request_context = passed_handler('calc_fast_api', 'calc.add', {}, {})
+    assert isinstance(request_context, OpenApiRequestContext)
+    assert request_context.headers['X-Custom-Request-ID'] == 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    assert request_context.headers['X-Custom-Correlation-ID'] == 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+    assert request_context.session_id != 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
