@@ -45,7 +45,7 @@ All domain-layer packages (`domain/`, `interfaces/`, `events/`, `mappers/`, `rep
 4. If `view_func` is omitted, blueprints bind the asset view to the composed context as a request-only FastAPI endpoint.
 5. `get_routers(interface_context)` returns declared `ApiRouter` objects via `FastApiContext.get_routers()`.
 6. `build_router()` resolves `response_model` via `resolve_model()` and passes Swagger metadata to `add_api_route()`.
-7. A `FastAPI` instance is assembled with `starlette_context` middleware and routers, then returned.
+7. A `FastAPI` instance is assembled with `starlette_context` middleware and routers, then returned. `/docs` is intentional FastAPI-native generation; `get_docs_spec` is not wired.
 8. At runtime, `FastApiContext.handle_error()` converts domain errors to `HTTPException` with status codes resolved via the injected status-code handler. `OpenApiSessionContext.build_response` returns `(body, status_code)`.
 
 ## Configuration
