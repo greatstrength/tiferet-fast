@@ -1,10 +1,8 @@
-interfaces:
+sessions:
   calc_fast_api:
     name: Calculator FastAPI
     description: Arithmetic operations via FastAPI with Swagger docs
-    module_path: tiferet_fast.contexts.fast
-    class_name: FastApiContext
-    attrs:
+    services:
       openapi_service:
         module_path: tiferet_openapi.repos.openapi
         class_name: OpenApiYamlRepository

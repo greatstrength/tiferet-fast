@@ -1,14 +1,14 @@
-# AGENTS.md — Tiferet Fast (v0.4.0)
+# AGENTS.md — Tiferet Fast
 
 ## Project Overview
 
-**Tiferet Fast** is a thin FastAPI adapter for the Tiferet Python framework. Starting with v0.3, all domain objects, service interfaces, domain events, mappers, and repositories live in [tiferet-openapi](https://github.com/greatstrength/tiferet-openapi). In v0.4, the class-based `FastApiBuilder` is replaced by composable **blueprint functions**, aligning with the Tiferet core blueprint pattern.
+**Tiferet Fast** is a thin FastAPI adapter for the Tiferet Python framework. All domain objects, service interfaces, domain events, mappers, and repositories live in [tiferet-openapi](https://github.com/greatstrength/tiferet-openapi). Composable **blueprint functions** assemble a FastAPI app from a tiferet 2.1.0 session and tiferet-openapi's declared routers.
 
 - **Repository:** https://github.com/greatstrength/tiferet-fast
-- **Branch:** `main`
+- **Branch:** `v1.x-proto`
 - **Python:** ≥ 3.10
-- **Version:** `0.4.0`
-- **Dependencies:** `tiferet-openapi>=0.1.3`, `fastapi>=0.118.0`, `starlette-context>=0.4.0`
+- **Version:** `1.0.0b2`
+- **Dependencies:** `tiferet>=2.1.0`, `tiferet-openapi>=1.0.0`, `fastapi>=0.118.0`, `starlette-context>=0.4.0`
 
 ## Architecture
 
@@ -16,46 +16,49 @@
 
 ```
 tiferet_fast/
-├── blueprints/     # Blueprint functions (build_fast_app, build_router, get_routers, resolve_model)
-├── contexts/       # FastApiContext (extends OpenApiContext), FastRequestContext (alias)
+├── assets/         # Built-in view_func and handler service-id constants
+├── blueprints/     # Blueprint functions (build_fast_app, build_fast_session_context, build_router, get_routers, resolve_model)
+├── contexts/       # FastApiContext (extends OpenApiSessionContext), FastRequestContext (alias)
 └── __init__.py     # Version, exports
 ```
 
-All domain-layer packages (`domain/`, `interfaces/`, `events/`, `mappers/`, `repos/`) were removed in v0.3. The `builders/` package was removed in v0.4 in favor of `blueprints/`. Consumers import domain types directly from `tiferet_openapi`.
+All domain-layer packages (`domain/`, `interfaces/`, `events/`, `mappers/`, `repos/`) live in `tiferet-openapi`. Consumers import domain types directly from `tiferet_openapi`.
 
 ### Key Concepts
 
-- **Blueprint Functions** (`blueprints/fast.py`): Composable functions that replace the `FastApiBuilder` class.
-  - `build_fast_app(interface_id, view_func, **parameters)` — One-call assembly of a complete FastAPI app with middleware and routers. Uses `resolve_interface()` and `realize_interface()` from `tiferet.blueprints.main`.
+- **Blueprint Functions** (`blueprints/fast.py`): Composable functions that assemble a FastAPI app.
+  - `build_fast_app(interface_id, view_func=None, **parameters)` — One-call assembly of a complete FastAPI app with middleware and routers. Loads the session via `core.build_cache` / `core.get_app_session` and composes `FastApiContext` via `build_fast_session_context`. Omitting `view_func` binds the built-in asset view.
+  - `build_fast_session_context(app_session, cache, ...)` — Composes a `FastApiContext` through `core.compose_session_context`, defaulting the request handler to `create_openapi_request_context`.
   - `build_router(router, view_func)` — Builds a single `APIRouter` from an `ApiRouter` domain object, passing Swagger metadata (`summary`, `description`, `tags`, `response_model`) to `add_api_route()`.
-  - `get_routers(service_provider)` — Resolves the `get_routers_evt` from the service provider and executes it.
-  - `resolve_model(model_path)` — Dynamically imports a Pydantic model class by dotted path for Swagger schema generation.
+  - `get_routers(interface_context)` — Returns routers from `FastApiContext.get_routers()`.
+  - `resolve_model(model_path)` — Dynamically imports a Pydantic model class by dotted path for Swagger schema generation. A bad path raises `TiferetError` with `OPENAPI_MODEL_RESOLUTION_FAILED`.
   - `FastAPI` — Alias for `build_fast_app`.
-- **FastApiContext** (`contexts/fast.py`): Extends `OpenApiContext` (from `tiferet_openapi`). Overrides `handle_error()` to convert `TiferetAPIError` into FastAPI's `HTTPException` with proper HTTP status codes and structured error details.
+- **FastApiContext** (`contexts/fast.py`): Extends `OpenApiSessionContext` (from `tiferet_openapi`). Adds `get_routers()` wrapping the injected handler callable. Overrides `handle_error()` to convert `TiferetAPIError` into FastAPI's `HTTPException` with proper HTTP status codes and structured error details.
 - **FastRequestContext** (`contexts/request.py`): Alias for `OpenApiRequestContext`. Serializes `BaseModel` results via `model_dump()`.
+- **Built-in view** (`assets/view.py`): Async `view_func(request, context)` that unpacks a FastAPI `Request` and calls `context.run`. Assets never import `FastApiContext`.
 
 ### Runtime Flow
 
-1. `build_fast_app(interface_id, view_func, **parameters)` is called with the interface ID, view function, and config parameters.
-2. `resolve_interface()` (from `tiferet.blueprints.main`) loads the interface definition and default services from YAML config.
-3. `realize_interface()` instantiates the `FastApiContext` with injected domain events (`GetRouters`, `GetRoute`, `GetStatusCode` from `tiferet_openapi`).
-4. A `ServiceProvider` is created and seeded with default service dependencies.
-5. `get_routers()` resolves `get_routers_evt`, which calls `OpenApiYamlRepository.get_routers()`.
+1. `build_fast_app(interface_id, view_func=None, **parameters)` is called with the interface ID and config parameters (`app_config` for the YAML file).
+2. `core.build_cache()` and `core.get_app_session()` load the `AppSession`.
+3. `build_fast_session_context()` composes a `FastApiContext` with OpenAPI handler closures (`get_route_handler`, `get_status_code_handler`, `get_routers_handler`) and `create_openapi_request_context`.
+4. If `view_func` is omitted, blueprints bind the asset view to the composed context as a request-only FastAPI endpoint.
+5. `get_routers(interface_context)` returns declared `ApiRouter` objects via `FastApiContext.get_routers()`.
 6. `build_router()` resolves `response_model` via `resolve_model()` and passes Swagger metadata to `add_api_route()`.
-7. A `FastAPI` instance is assembled with middleware and routers, then returned.
-8. At runtime, `FastApiContext.handle_error()` converts domain errors to `HTTPException` with status codes resolved via `GetStatusCode`, and `handle_response()` resolves route status codes via `GetRoute`.
+7. A `FastAPI` instance is assembled with `starlette_context` middleware and routers, then returned.
+8. At runtime, `FastApiContext.handle_error()` converts domain errors to `HTTPException` with status codes resolved via the injected status-code handler. `OpenApiSessionContext.build_response` returns `(body, status_code)`.
 
 ## Configuration
 
-v0.4 uses the tiferet v2 beta consolidated `config.yml` strategy — a single YAML file at the project root containing all sections:
+A consolidated `config.yml` at the project root contains all sections:
 
-- `interfaces` — App interface definitions (module_path, class_name, service dependencies)
+- `sessions` — App session definitions (`services` / `constants` for OpenAPI events and the OpenAPI repository)
 - `openapi` — Routers, routes (with Swagger metadata: `summary`, `description`, `tags`, `request_model`, `response_model`), and error-to-status-code mappings
 - `services` — Feature-level DI service configurations
 - `features` — Feature workflows (steps with `service_id`, `params`)
 - `errors` — Error definitions with multilingual messages
 
-The `openapi_yaml_file` parameter in the interface config can point to the same `config.yml`.
+The `openapi_yaml_file` parameter on `openapi_service` can point to the same `config.yml`. Pass `app_config='config.yml'` to `build_fast_app` / `core.get_app_session`.
 
 ## Testing
 
