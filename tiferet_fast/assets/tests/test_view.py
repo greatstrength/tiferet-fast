@@ -16,60 +16,52 @@ from tiferet import use_tester
 from .. import view as view_module
 from ..view import view_func
 
-# *** functions
+# *** fixtures
 
-# ** function: make_request
-def make_request(
-        body: bytes = b'{"a": 1}',
-        query_string: bytes = b'',
-        path_params: dict | None = None,
-        headers: list | None = None,
-        feature_id: str = 'calc.add',
-    ) -> Request:
+# ** fixture: make_request
+@pytest.fixture
+def make_request():
     '''
-    Build a Starlette/FastAPI Request with a named route in scope.
-
-    :param body: Raw HTTP body bytes.
-    :type body: bytes
-    :param query_string: Raw query string bytes.
-    :type query_string: bytes
-    :param path_params: Path parameters merged into feature data.
-    :type path_params: dict | None
-    :param headers: ASGI header tuples; defaults to JSON content-type.
-    :type headers: list | None
-    :param feature_id: Value exposed as ``scope['route'].name``.
-    :type feature_id: str
-    :return: A FastAPI Request.
-    :rtype: Request
+    Fixture to provide a factory that builds a FastAPI Request with a named route.
     '''
 
-    # Expose the feature id as the FastAPI route name.
-    route = mock.Mock()
-    route.name = feature_id
+    def _make_request(
+            body: bytes = b'{"a": 1}',
+            query_string: bytes = b'',
+            path_params: dict | None = None,
+            headers: list | None = None,
+            feature_id: str = 'calc.add',
+        ) -> Request:
 
-    # Assemble a minimal HTTP scope.
-    scope = {
-        'type': 'http',
-        'asgi': {'version': '3.0'},
-        'http_version': '1.1',
-        'method': 'POST',
-        'scheme': 'http',
-        'path': '/add',
-        'raw_path': b'/add',
-        'query_string': query_string,
-        'headers': headers or [(b'content-type', b'application/json'), (b'x-test', b'value')],
-        'client': ('testclient', 50000),
-        'server': ('testserver', 80),
-        'path_params': path_params or {},
-        'route': route,
-    }
+        # Expose the feature id as the FastAPI route name.
+        route = mock.Mock()
+        route.name = feature_id
 
-    # Serve the body once through the ASGI receive callable.
-    async def receive():
-        return {'type': 'http.request', 'body': body, 'more_body': False}
+        # Assemble a minimal HTTP scope.
+        scope = {
+            'type': 'http',
+            'asgi': {'version': '3.0'},
+            'http_version': '1.1',
+            'method': 'POST',
+            'scheme': 'http',
+            'path': '/add',
+            'raw_path': b'/add',
+            'query_string': query_string,
+            'headers': headers or [(b'content-type', b'application/json'), (b'x-test', b'value')],
+            'client': ('testclient', 50000),
+            'server': ('testserver', 80),
+            'path_params': path_params or {},
+            'route': route,
+        }
 
-    # Return the constructed request.
-    return Request(scope, receive)
+        # Serve the body once through the ASGI receive callable.
+        async def receive():
+            return {'type': 'http.request', 'body': body, 'more_body': False}
+
+        # Return the constructed request.
+        return Request(scope, receive)
+
+    return _make_request
 
 # *** tests
 
@@ -101,7 +93,7 @@ class TestViewFunc:
     '''
 
     # * test: unpacks_json_query_and_path_then_unwraps_body
-    def test_view_func_unpacks_and_unwraps_tuple_response(self, session) -> None:
+    def test_view_func_unpacks_and_unwraps_tuple_response(self, session, make_request) -> None:
         '''
         Verify view_func unpacks JSON, query, and path params into data,
         copies headers, calls context.run, and unwraps (body, status_code).
@@ -133,7 +125,7 @@ class TestViewFunc:
         )
 
     # * test: empty_body_becomes_empty_dict
-    def test_view_func_empty_body_becomes_empty_dict(self, session) -> None:
+    def test_view_func_empty_body_becomes_empty_dict(self, session, make_request) -> None:
         '''
         Verify a non-JSON body becomes {} before query and path params merge.
         '''
@@ -164,7 +156,7 @@ class TestViewFunc:
         )
 
     # * test: http_exception_propagates
-    def test_view_func_http_exception_propagates(self, session) -> None:
+    def test_view_func_http_exception_propagates(self, session, make_request) -> None:
         '''
         Verify view_func does not catch HTTPException raised from context.run.
         '''
