@@ -4,7 +4,7 @@
 
 # ** core
 import importlib
-from typing import Callable
+from typing import Any, Callable, List
 from functools import partial
 
 # ** infra
@@ -13,14 +13,30 @@ from fastapi.routing import APIRouter
 from starlette.middleware import Middleware
 from starlette_context import plugins
 from starlette_context.middleware import RawContextMiddleware
-from tiferet.di import ServiceProvider
-from tiferet_openapi import ApiRouter
-from tiferet.blueprints.main import (
-    resolve_interface,
-    realize_interface,
-    create_service_provider,
+from tiferet import TiferetError, assets as a
+from tiferet.blueprints import core
+try:
+    from tiferet.blueprints.main import (
+        resolve_interface,
+        realize_interface,
+        create_service_provider,
+    )
+except ImportError:
+    resolve_interface = None
+    realize_interface = None
+    create_service_provider = None
+from tiferet.contexts.app import AppSession
+from tiferet.contexts.cache import CacheContext
+from tiferet_openapi import ApiRouter, create_openapi_request_context
+
+# ** app
+from ..assets.core import (
+    APP_FLAG,
+    GET_ROUTE_EVT_SERVICE_ID,
+    GET_ROUTERS_EVT_SERVICE_ID,
+    GET_STATUS_CODE_EVT_SERVICE_ID,
 )
-from tiferet import assets as a
+from ..contexts.fast import FastApiContext
 
 # *** blueprints
 
@@ -39,28 +55,153 @@ def resolve_model(model_path: str | None) -> type | None:
     if not model_path:
         return None
 
-    # Split the path into module and class name.
-    module_path, class_name = model_path.rsplit('.', 1)
+    # Import the model class from the dotted path.
+    try:
 
-    # Import the module and return the class.
-    module = importlib.import_module(module_path)
-    return getattr(module, class_name)
+        # Split the path into module and class name.
+        module_path, class_name = model_path.rsplit('.', 1)
+
+        # Import the module and return the class.
+        module = importlib.import_module(module_path)
+        return getattr(module, class_name)
+
+    except Exception as exception:
+
+        # Raise a structured error carrying the failing path and reason.
+        TiferetError.raise_error(
+            'OPENAPI_MODEL_RESOLUTION_FAILED',
+            f'Failed to resolve model schema for path: {model_path}.',
+            model_path=model_path,
+            reason=str(exception),
+        )
+
+
+# ** blueprint: get_route_handler
+def get_route_handler(get_dependency: Callable) -> Callable:
+    '''
+    Build a route-lookup closure that resolves the get-route event via DI.
+
+    :param get_dependency: The DI resolution handler.
+    :type get_dependency: Callable
+    :return: A callable that retrieves a route by endpoint.
+    :rtype: Callable
+    '''
+
+    # Return the handler closure bound to the resolver.
+    def handler(**kwargs) -> Any:
+
+        # Resolve and execute the get-route event.
+        get_route_evt = get_dependency(GET_ROUTE_EVT_SERVICE_ID, APP_FLAG)
+        return get_route_evt.execute(**kwargs)
+
+    # Return the closure.
+    return handler
+
+
+# ** blueprint: get_status_code_handler
+def get_status_code_handler(get_dependency: Callable) -> Callable:
+    '''
+    Build a status-code-lookup closure that resolves the get-status-code event via DI.
+
+    :param get_dependency: The DI resolution handler.
+    :type get_dependency: Callable
+    :return: A callable that retrieves an HTTP status code by error code.
+    :rtype: Callable
+    '''
+
+    # Return the handler closure bound to the resolver.
+    def handler(**kwargs) -> Any:
+
+        # Resolve and execute the get-status-code event.
+        get_status_code_evt = get_dependency(GET_STATUS_CODE_EVT_SERVICE_ID, APP_FLAG)
+        return get_status_code_evt.execute(**kwargs)
+
+    # Return the closure.
+    return handler
+
+
+# ** blueprint: get_routers_handler
+def get_routers_handler(get_dependency: Callable) -> Callable:
+    '''
+    Build a routers-lookup closure that resolves the get-routers event via DI.
+
+    :param get_dependency: The DI resolution handler.
+    :type get_dependency: Callable
+    :return: A callable that retrieves the configured routers.
+    :rtype: Callable
+    '''
+
+    # Return the handler closure bound to the resolver.
+    def handler(**kwargs) -> Any:
+
+        # Resolve and execute the get-routers event.
+        get_routers_evt = get_dependency(GET_ROUTERS_EVT_SERVICE_ID, APP_FLAG)
+        return get_routers_evt.execute(**kwargs)
+
+    # Return the closure.
+    return handler
+
+
+# ** blueprint: build_fast_session_context
+def build_fast_session_context(app_session: AppSession,
+        cache: CacheContext,
+        create_request_handler: Callable = None,
+        **extra_kwargs) -> FastApiContext:
+    '''
+    Build a fully wired FastApiContext from a resolved app session.
+
+    An omitted create_request_handler defaults to create_openapi_request_context.
+    An explicit handler is assigned as-is and is not wrapped.
+
+    :param app_session: The resolved app session definition.
+    :type app_session: AppSession
+    :param cache: The pre-built shared cache context.
+    :type cache: CacheContext
+    :param create_request_handler: Optional request-construction handler;
+        defaults to create_openapi_request_context when omitted.
+    :type create_request_handler: Callable
+    :param extra_kwargs: Additional keyword arguments forwarded to
+        core.compose_session_context.
+    :type extra_kwargs: dict
+    :return: The wired FastAPI session context.
+    :rtype: FastApiContext
+    '''
+
+    # Build the app service container.
+    app_container = core.build_app_service_container(cache, app_session)
+
+    # Compose the feature-level resolver.
+    resolver = core.build_service_resolver(app_container)
+
+    # Delegate handler wiring, collaborator resolution, and construction.
+    return core.compose_session_context(
+        FastApiContext,
+        app_session,
+        cache,
+        app_container,
+        resolver,
+        create_request_handler=create_request_handler or create_openapi_request_context,
+        response_handler=core.response_handler,
+        get_route_handler=get_route_handler(resolver.get_dependency),
+        get_status_code_handler=get_status_code_handler(resolver.get_dependency),
+        get_routers_handler=get_routers_handler(resolver.get_dependency),
+        **extra_kwargs,
+    )
 
 
 # ** blueprint: get_routers
-def get_routers(service_provider: ServiceProvider) -> list:
+def get_routers(interface_context: FastApiContext) -> List[ApiRouter]:
     '''
-    Resolve and execute the get_routers event from the service provider.
+    Retrieve the configured routers from the FastAPI session context.
 
-    :param service_provider: The service provider to resolve the event from.
-    :type service_provider: ServiceProvider
+    :param interface_context: The realized FastAPI session context.
+    :type interface_context: FastApiContext
     :return: A list of ApiRouter domain objects.
-    :rtype: list
+    :rtype: List[ApiRouter]
     '''
 
-    # Resolve the get_routers event and execute it.
-    get_routers_evt = service_provider.get_service('get_routers_evt')
-    return get_routers_evt.execute()
+    # Retrieve the routers from the interface context.
+    return interface_context.get_routers()
 
 
 # ** blueprint: build_router
