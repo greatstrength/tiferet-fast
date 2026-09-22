@@ -48,6 +48,32 @@ from ..fast import (
     run,
 )
 
+# *** functions
+
+# ** function: iter_app_routes
+def iter_app_routes(app: FastAPI):
+    '''
+    Yield routes from a FastAPI app, including FastAPI 0.141 included routers.
+
+    FastAPI 0.141 stores ``include_router`` results as ``_IncludedRouter``
+    objects on ``app.routes`` (``path`` is None) instead of flattening
+    ``APIRoute`` entries. Nested routes live on ``original_router.routes``.
+
+    :param app: The assembled FastAPI application.
+    :type app: FastAPI
+    :return: Route objects that expose a ``path`` attribute.
+    '''
+
+    # Walk top-level entries, expanding included routers when present.
+    for route in app.routes:
+        nested = getattr(route, 'original_router', None)
+        if nested is not None:
+            yield from nested.routes
+            continue
+
+        # Yield flattened routes (FastAPI < 0.141) and docs routes.
+        yield route
+
 # *** fixtures
 
 # ** fixture: sample_route_plain
@@ -636,7 +662,7 @@ class TestBuildFastApp:
 
         # Assert a FastAPI app was returned with the router included.
         assert isinstance(result, FastAPI)
-        assert any(getattr(route, 'path', None) == '/calc/add' for route in result.routes)
+        assert any(getattr(route, 'path', None) == '/calc/add' for route in iter_app_routes(result))
 
         # Assert RawContextMiddleware is mounted.
         assert any(middleware.cls is RawContextMiddleware for middleware in result.user_middleware)
@@ -706,7 +732,7 @@ class TestBuildFastApp:
             result = session.given(interface_id='test_interface').run(target=build_fast_app)
 
         # Assert the bound endpoint is a Request-only wrapper.
-        route = next(item for item in result.routes if getattr(item, 'path', None) == '/calc/add')
+        route = next(item for item in iter_app_routes(result) if getattr(item, 'path', None) == '/calc/add')
         endpoint = route.endpoint
         assert isinstance(endpoint, partial)
         assert list(signature(endpoint.func).parameters) == ['request']
@@ -740,7 +766,7 @@ class TestBuildFastApp:
             ).run(target=build_fast_app)
 
         # Assert the supplied callable is the bound endpoint.
-        route = next(item for item in result.routes if getattr(item, 'path', None) == '/calc/add')
+        route = next(item for item in iter_app_routes(result) if getattr(item, 'path', None) == '/calc/add')
         endpoint = route.endpoint
         assert isinstance(endpoint, partial)
         assert endpoint.func is mock_view_func
