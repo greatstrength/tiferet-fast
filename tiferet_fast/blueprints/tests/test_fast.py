@@ -11,14 +11,24 @@ from unittest import mock
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.routing import APIRouter
+from starlette_context import plugins, request_cycle_context
+from starlette_context.middleware import RawContextMiddleware
 from tiferet import TiferetError, TiferetAPIError, use_tester
 from tiferet.blueprints import core
 from tiferet.contexts.cache import CacheContext
 from tiferet.domain import AppSession
 from tiferet_openapi import create_openapi_request_context
+from tiferet_openapi.contexts.request import OpenApiRequestContext
 from tiferet_openapi.domain import ApiRoute, ApiRouter
 
 # ** app
+from ...assets.context_headers import (
+    CORRELATION_ID_HEADER_CONST_KEY,
+    DEFAULT_CORRELATION_ID_HEADER,
+    DEFAULT_REQUEST_ID_HEADER,
+    REQUEST_ID_HEADER_CONST_KEY,
+    parse_context_header_options,
+)
 from ...assets.core import (
     APP_FLAG,
     GET_ROUTE_EVT_SERVICE_ID,
@@ -30,6 +40,7 @@ from ...contexts.fast import FastApiContext
 from ..fast import (
     build_fast_session_context,
     build_router,
+    create_fast_request_handler,
     get_route_handler,
     get_routers,
     get_routers_handler,
@@ -170,8 +181,10 @@ def mock_app_session() -> mock.Mock:
     Fixture providing the AppSession stand-in returned by patched core.get_app_session.
     '''
 
-    # Return a mock app session.
-    return mock.Mock()
+    # Return a mock app session with empty constants.
+    app_session = mock.Mock()
+    app_session.constants = {}
+    return app_session
 
 # *** tests
 
@@ -487,6 +500,78 @@ class TestGetRoutersHandler:
         get_routers_evt.execute.assert_called_once_with()
         assert result is mock.sentinel.routers
 
+# ** tester: test_create_fast_request_handler
+@use_tester(
+    type='generic',
+    target_cls=create_fast_request_handler,
+)
+class TestCreateFastRequestHandler:
+    '''
+    Generic tester for create_fast_request_handler.
+    '''
+
+    # * test: copies_context_headers
+    def test_create_fast_request_handler_copies_context_headers(self, session) -> None:
+        '''
+        Verify the adapter copies plugin ids onto request headers.
+
+        :param session: A fresh test session.
+        :type session: TestSessionContext
+        '''
+
+        # Build the default-keys request adapter.
+        handler = session.given(
+            header_keys=parse_context_header_options({}),
+        ).run(target=create_fast_request_handler)
+        request_id = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        correlation_id = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+
+        # Construct a request inside a request cycle with plugin ids.
+        with request_cycle_context({
+            DEFAULT_REQUEST_ID_HEADER: request_id,
+            DEFAULT_CORRELATION_ID_HEADER: correlation_id,
+        }):
+            result = handler(
+                'calc_fast_api',
+                'calc.add',
+                {'content-type': 'application/json'},
+                {'a': 1},
+            )
+
+        # Assert plugin ids are copied and session_id is not a header.
+        assert isinstance(result, OpenApiRequestContext)
+        assert result.headers[DEFAULT_REQUEST_ID_HEADER] == request_id
+        assert result.headers[DEFAULT_CORRELATION_ID_HEADER] == correlation_id
+        assert result.headers['interface_id'] == 'calc_fast_api'
+        assert result.feature_id == 'calc.add'
+        assert result.data == {'a': 1}
+        assert 'session_id' not in result.headers
+        assert result.session_id != request_id
+        assert '-' in result.session_id
+
+    # * test: without_request_cycle
+    def test_create_fast_request_handler_without_request_cycle(self, session) -> None:
+        '''
+        Verify the adapter does not invent ids outside a request cycle.
+
+        :param session: A fresh test session.
+        :type session: TestSessionContext
+        '''
+
+        # Build the default-keys request adapter.
+        handler = session.given(
+            header_keys=parse_context_header_options({}),
+        ).run(target=create_fast_request_handler)
+
+        # Construct a request with no request-cycle context.
+        result = handler('calc_fast_api', 'calc.add', {}, {})
+
+        # Assert inbound headers are unchanged aside from interface_id.
+        assert isinstance(result, OpenApiRequestContext)
+        assert DEFAULT_REQUEST_ID_HEADER not in result.headers
+        assert result.headers['interface_id'] == 'calc_fast_api'
+        assert result.session_id
+
 # ** tester: test_build_fast_session_context
 @use_tester(
     type='generic',
@@ -523,7 +608,8 @@ class TestBuildFastSessionContext:
         # Assert the constructed context, bound domain, and default handlers.
         assert isinstance(result, FastApiContext)
         assert result.domain is app_session
-        assert result._create_request is create_openapi_request_context
+        assert callable(result._create_request)
+        assert result._create_request is not create_openapi_request_context
         assert result._build_response is core.response_handler
         assert callable(result._get_route)
         assert callable(result._get_status_code)
@@ -552,8 +638,9 @@ class TestBuildFastSessionContext:
             target=build_fast_session_context
         )
 
-        # Assert the OpenAPI request factory is wired without wrapping.
-        assert result._create_request is create_openapi_request_context
+        # Assert the default request handler wraps the OpenAPI factory.
+        assert callable(result._create_request)
+        assert result._create_request is not create_openapi_request_context
 
     # * test: accepts_custom_request_handler
     def test_build_fast_session_context_accepts_custom_request_handler(
@@ -583,6 +670,43 @@ class TestBuildFastSessionContext:
 
         # Assert the custom request handler is wired without wrapping.
         assert result._create_request is custom_handler
+
+    # * test: default_handler_copies_headers
+    def test_build_fast_session_context_default_handler_copies_headers(
+            self,
+            session,
+            app_session: AppSession,
+            cache: CacheContext,
+        ) -> None:
+        '''
+        Verify the default request handler copies plugin ids onto headers.
+
+        :param session: A fresh test session.
+        :type session: TestSessionContext
+        :param app_session: The AppSession domain object.
+        :type app_session: AppSession
+        :param cache: The bootstrap cache.
+        :type cache: CacheContext
+        '''
+
+        # Exercise build_fast_session_context with cache and session only.
+        result = session.given(app_session=app_session, cache=cache).run(
+            target=build_fast_session_context
+        )
+        request_id = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        correlation_id = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+
+        # Construct a request through the default handler inside a request cycle.
+        with request_cycle_context({
+            DEFAULT_REQUEST_ID_HEADER: request_id,
+            DEFAULT_CORRELATION_ID_HEADER: correlation_id,
+        }):
+            request_ctx = result._create_request('calc_fast_api', 'calc.add', {}, {})
+
+        # Assert plugin ids are copied and session_id is not the request id.
+        assert isinstance(request_ctx, OpenApiRequestContext)
+        assert request_ctx.headers[DEFAULT_REQUEST_ID_HEADER] == request_id
+        assert request_ctx.session_id != request_id
 
 # ** tester: test_build_fast_app
 @use_tester(
@@ -645,6 +769,7 @@ class TestBuildFastApp:
         assert result.title == 'test_interface API'
         mock_get_app_session.assert_called_once_with('test_interface', mock_cache)
         assert mock_build_session.call_args.args == (mock_app_session, mock_cache)
+        assert callable(mock_build_session.call_args.kwargs['create_request_handler'])
 
     # * test: extra_parameters_go_to_get_app_session
     def test_build_fast_app_extra_parameters_go_to_get_app_session(
@@ -830,6 +955,68 @@ class TestBuildFastApp:
 
         # Assert the catalogued API error handler is registered once.
         assert result.exception_handlers[TiferetAPIError] is handle_tiferet_api_error
+
+    # * test: mounts_keyed_middleware_and_adapter
+    def test_build_fast_app_mounts_keyed_middleware_and_adapter(
+            self,
+            session,
+            mock_app_session,
+        ) -> None:
+        '''
+        Verify build_fast_app keys both plugins and the request adapter from session constants.
+
+        :param session: A fresh test session.
+        :type session: TestSessionContext
+        :param mock_app_session: The AppSession stand-in.
+        :type mock_app_session: mock.Mock
+        '''
+
+        # Override closed header names on the session constants.
+        mock_app_session.constants = {
+            REQUEST_ID_HEADER_CONST_KEY: 'X-Custom-Request-ID',
+            CORRELATION_ID_HEADER_CONST_KEY: 'X-Custom-Correlation-ID',
+        }
+        mock_context = mock.Mock()
+        mock_context.get_routers.return_value = []
+
+        # Exercise build_fast_app with the patched collaborators.
+        with mock.patch(
+            'tiferet_fast.blueprints.fast.core.build_cache',
+            return_value=mock.Mock(),
+        ), mock.patch(
+            'tiferet_fast.blueprints.fast.core.get_app_session',
+            return_value=mock_app_session,
+        ), mock.patch(
+            'tiferet_fast.blueprints.fast.build_fast_session_context',
+            return_value=mock_context,
+        ) as mock_build_session:
+            result = session.given(interface_id='calc_fast_api').run(
+                target=build_fast_app
+            )
+
+        # Assert keyed plugins are mounted in request-id then correlation-id order.
+        assert result.user_middleware[0].cls is RawContextMiddleware
+        mounted_plugins = result.user_middleware[0].kwargs['plugins']
+        assert isinstance(mounted_plugins[0], plugins.RequestIdPlugin)
+        assert mounted_plugins[0].key == 'X-Custom-Request-ID'
+        assert isinstance(mounted_plugins[1], plugins.CorrelationIdPlugin)
+        assert mounted_plugins[1].key == 'X-Custom-Correlation-ID'
+
+        # Call the passed adapter inside a request cycle keyed by those custom names.
+        handler = mock_build_session.call_args.kwargs['create_request_handler']
+        request_id = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        correlation_id = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+        with request_cycle_context({
+            'X-Custom-Request-ID': request_id,
+            'X-Custom-Correlation-ID': correlation_id,
+        }):
+            request_ctx = handler('calc_fast_api', 'calc.add', {}, {})
+
+        # Assert custom header ids are copied and session_id is not the request id.
+        assert isinstance(request_ctx, OpenApiRequestContext)
+        assert request_ctx.headers['X-Custom-Request-ID'] == request_id
+        assert request_ctx.headers['X-Custom-Correlation-ID'] == correlation_id
+        assert request_ctx.session_id != request_id
 
 # ** tester: test_run
 @use_tester(
