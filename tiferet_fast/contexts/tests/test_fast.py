@@ -2,181 +2,200 @@
 
 # *** imports
 
+# ** core
+from typing import Callable
+from unittest import mock
+
 # ** infra
 import pytest
-from unittest import mock
-from fastapi import HTTPException
-from tiferet import TiferetError
-from tiferet.assets.exceptions import TiferetAPIError
-from tiferet.events import DomainEvent
-from tiferet.contexts.error import ErrorContext
-from tiferet.contexts.feature import FeatureContext
-from tiferet.contexts.logging import LoggingContext
-from tiferet_openapi.domain import ApiRoute
+from tiferet import use_tester
+from tiferet.contexts.app import AppSessionContext
+from tiferet.contexts.core import BaseContext, ContextMeta
+from tiferet.domain import AppSession
+from tiferet_openapi import ApiRoute, ApiRouter, OpenApiSessionContext
 
 # ** app
-from ...contexts.fast import FastApiContext
-from ...contexts.request import FastRequestContext
+from ..fast import FastApiContext
 
 # *** fixtures
 
-# ** fixture: sample_route
+# ** fixture: app_session
 @pytest.fixture
-def sample_route() -> ApiRoute:
+def app_session() -> AppSession:
     '''
-    Fixture to provide a sample ApiRoute instance for testing.
+    Provide a sample AppSession for FastApiContext construction.
+
+    :return: An AppSession bound to the test FastAPI interface.
+    :rtype: AppSession
     '''
 
-    # Create an ApiRoute instance.
-    return ApiRoute(
-        id='add',
-        endpoint='calc.add',
-        path='/add',
-        methods=['GET', 'POST'],
-        status_code=200,
-    )
+    # Return a minimal AppSession for from_domain construction.
+    return AppSession(id='test_fast', name='Test Fast API')
+
+# ** fixture: get_dependency
+@pytest.fixture
+def get_dependency() -> Callable:
+    '''
+    Provide a mock get_dependency handler.
+
+    :return: A mock callable.
+    :rtype: Callable
+    '''
+
+    # Return a mock DI resolution handler.
+    return mock.Mock()
+
+# ** fixture: get_route_handler
+@pytest.fixture
+def get_route_handler() -> Callable:
+    '''
+    Provide a mock get_route handler.
+
+    :return: A mock callable.
+    :rtype: Callable
+    '''
+
+    # Return a mock route handler.
+    return mock.Mock()
+
+# ** fixture: get_status_code_handler
+@pytest.fixture
+def get_status_code_handler() -> Callable:
+    '''
+    Provide a mock get_status_code handler.
+
+    :return: A mock callable.
+    :rtype: Callable
+    '''
+
+    # Return a mock status-code handler.
+    return mock.Mock()
+
+# ** fixture: get_routers_handler
+@pytest.fixture
+def get_routers_handler() -> Callable:
+    '''
+    Provide a mock get_routers handler.
+
+    :return: A mock callable.
+    :rtype: Callable
+    '''
+
+    # Return a mock routers handler.
+    return mock.Mock()
 
 # ** fixture: fast_api_context
 @pytest.fixture
-def fast_api_context(sample_route: ApiRoute) -> FastApiContext:
+def fast_api_context(app_session: AppSession,
+                     get_dependency: Callable,
+                     get_route_handler: Callable,
+                     get_status_code_handler: Callable,
+                     get_routers_handler: Callable) -> FastApiContext:
     '''
-    Fixture to provide a FastApiContext instance for testing.
+    Bind FastApiContext via from_domain using the OpenApiSessionContext constructor kwargs.
+
+    :param app_session: The bound AppSession domain object.
+    :type app_session: AppSession
+    :param get_dependency: The required DI resolution handler.
+    :type get_dependency: Callable
+    :param get_route_handler: The injected route handler.
+    :type get_route_handler: Callable
+    :param get_status_code_handler: The injected status-code handler.
+    :type get_status_code_handler: Callable
+    :param get_routers_handler: The injected routers handler.
+    :type get_routers_handler: Callable
+    :return: A FastApiContext bound to app_session.
+    :rtype: FastApiContext
     '''
 
-    # Create a mock feature context.
-    mock_features = mock.Mock(spec=FeatureContext)
+    # Construct FastApiContext via inherited from_domain.
+    return FastApiContext.from_domain(
+        app_session,
+        get_dependency=get_dependency,
+        get_route_handler=get_route_handler,
+        get_status_code_handler=get_status_code_handler,
+        get_routers_handler=get_routers_handler,
+    )
 
-    # Create a mock error context.
-    mock_errors = mock.Mock(spec=ErrorContext)
-    mock_errors.handle_error.return_value = {
-        'error_code': 'APP_ERROR',
-        'name': 'Application Error',
-        'message': 'An error occurred.',
-    }
+# ** fixture: sample_router
+@pytest.fixture
+def sample_router() -> ApiRouter:
+    '''
+    Provide a sample ApiRouter with one route.
 
-    # Create a mock logging context.
-    mock_logging = mock.Mock(spec=LoggingContext)
+    :return: An ApiRouter named calc with a POST /add route.
+    :rtype: ApiRouter
+    '''
 
-    # Create a mock get_route_evt.
-    mock_get_route_evt = mock.Mock(spec=DomainEvent)
-    mock_get_route_evt.execute = mock.Mock(return_value=sample_route)
-
-    # Create a mock get_status_code_evt.
-    mock_get_status_code_evt = mock.Mock(spec=DomainEvent)
-    mock_get_status_code_evt.execute = mock.Mock(return_value=400)
-
-    # Create a mock get_routers_evt.
-    mock_get_routers_evt = mock.Mock(spec=DomainEvent)
-    mock_get_routers_evt.execute = mock.Mock(return_value=[])
-
-    # Create and return the FastApiContext instance.
-    return FastApiContext(
-        interface_id='test_fast',
-        features=mock_features,
-        errors=mock_errors,
-        logging=mock_logging,
-        get_route_evt=mock_get_route_evt,
-        get_status_code_evt=mock_get_status_code_evt,
-        get_routers_evt=mock_get_routers_evt,
+    # Return a sample ApiRouter with one route.
+    return ApiRouter(
+        name='calc',
+        prefix='/calc',
+        routes=[
+            ApiRoute(id='add', endpoint='calc.add', path='/add', methods=['POST'], status_code=200),
+        ],
     )
 
 # *** tests
 
-# ** test: fast_api_context_parse_request
-def test_fast_api_context_parse_request(fast_api_context: FastApiContext):
+# ** test: fast_api_context_not_registered
+def test_fast_api_context_not_registered():
     '''
-    Test the parse_request method of FastApiContext.
-
-    :param fast_api_context: A FastApiContext instance.
-    :type fast_api_context: FastApiContext
-    '''
-
-    # Sample headers and data.
-    sample_headers = {'Content-Type': 'application/json'}
-    sample_data = {'key': 'value'}
-
-    # Parse the request.
-    request_context = fast_api_context.parse_request(
-        headers=sample_headers,
-        data=sample_data,
-        feature_id='calc.add'
-    )
-
-    # Assert that the returned object is a FastRequestContext instance.
-    assert isinstance(request_context, FastRequestContext)
-    assert request_context.headers == sample_headers
-    assert request_context.data == sample_data
-    assert request_context.feature_id == 'calc.add'
-
-# ** test: fast_api_context_handle_error
-def test_fast_api_context_handle_error(fast_api_context: FastApiContext):
-    '''
-    Test the handle_error method of FastApiContext with a generic exception.
-
-    :param fast_api_context: A FastApiContext instance.
-    :type fast_api_context: FastApiContext
+    Verify FastApiContext declares no domain_type, does not steal the AppSession
+    registry slot from AppSessionContext, subclasses OpenApiSessionContext, and
+    does not declare handle_error.
     '''
 
-    # Create a sample exception.
-    sample_exception = Exception('Sample error')
+    # Assert FastApiContext does not declare domain_type in its own namespace.
+    assert 'domain_type' not in FastApiContext.__dict__
 
-    # Call the handle_error method and expect HTTPException.
-    with pytest.raises(HTTPException) as exc_info:
-        fast_api_context.handle_error(sample_exception)
+    # Assert FastApiContext is not registered in ContextMeta.
+    assert FastApiContext not in ContextMeta.registry.values()
 
-    # Assert the status code is 500 for non-TiferetError.
-    assert exc_info.value.status_code == 500
+    # Assert AppSession remains mapped to AppSessionContext.
+    assert BaseContext.for_domain(AppSession) is AppSessionContext
 
-# ** test: fast_api_context_handle_tiferet_error
-def test_fast_api_context_handle_tiferet_error(fast_api_context: FastApiContext):
+    # Assert FastApiContext subclasses OpenApiSessionContext.
+    assert issubclass(FastApiContext, OpenApiSessionContext)
+
+    # Assert FastApiContext does not declare handle_error.
+    assert 'handle_error' not in FastApiContext.__dict__
+
+# *** testers
+
+# ** tester: test_fast_api_context
+@use_tester(type='generic', target_cls=FastApiContext)
+class TestFastApiContext:
     '''
-    Test the handle_error method of FastApiContext with a TiferetError.
-
-    :param fast_api_context: A FastApiContext instance.
-    :type fast_api_context: FastApiContext
-    '''
-
-    # Create a sample TiferetError.
-    sample_tiferet_error = TiferetError('INVALID_INPUT', 'Invalid input provided.')
-
-    # Mock the error handler to return a specific response.
-    fast_api_context.errors.handle_error.return_value = {
-        'error_code': 'INVALID_INPUT',
-        'name': 'Invalid Input',
-        'message': 'Invalid input provided.',
-    }
-
-    # Call the handle_error method and expect HTTPException.
-    with pytest.raises(HTTPException) as exc_info:
-        fast_api_context.handle_error(sample_tiferet_error)
-
-    # Assert the status code is 400 (from mock get_status_code_evt).
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.detail['error'] == 'Invalid Input'
-    assert exc_info.value.detail['message'] == 'Invalid input provided.'
-
-# ** test: fast_api_context_handle_response
-def test_fast_api_context_handle_response(fast_api_context: FastApiContext):
-    '''
-    Test the handle_response method of FastApiContext.
-
-    :param fast_api_context: A FastApiContext instance.
-    :type fast_api_context: FastApiContext
+    Generic tester covering the FastApiContext method get_routers.
     '''
 
-    # Create a new request context from the fast_api_context.
-    request_context = fast_api_context.parse_request(
-        headers={'Content-Type': 'application/json'},
-        data={'key': 'value'},
-        feature_id='calc.add'
-    )
+    # * test: get_routers_calls_handler_directly
+    def test_get_routers_calls_handler_directly(self,
+            session,
+            fast_api_context: FastApiContext,
+            get_routers_handler: Callable,
+            sample_router: ApiRouter) -> None:
+        '''
+        Verify get_routers returns whatever the injected get_routers_handler
+        mock returns when _get_routers() is called directly, not .execute().
 
-    # Set a sample result in the request context.
-    request_context.set_result({'result_key': 'result_value'})
+        :param session: The injected TestSessionContext.
+        :type session: TestSessionContext
+        :param fast_api_context: The FastApiContext bound via from_domain.
+        :type fast_api_context: FastApiContext
+        :param get_routers_handler: The injected routers handler mock.
+        :type get_routers_handler: Callable
+        :param sample_router: A sample ApiRouter with one route.
+        :type sample_router: ApiRouter
+        '''
 
-    # Handle the response.
-    response, status_code = fast_api_context.handle_response(request_context)
+        # Configure the injected handler to return a known router list.
+        get_routers_handler.return_value = [sample_router]
 
-    # Assert that the response is as expected.
-    assert response == {'result_key': 'result_value'}
-    assert status_code == 200
+        # Exercise get_routers as a bound-method target.
+        result = session.run(target=fast_api_context.get_routers)
+
+        # Assert the result and the direct call shape.
+        assert result == [sample_router]
+        get_routers_handler.assert_called_once_with()
