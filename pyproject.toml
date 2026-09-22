@@ -33,6 +33,7 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = [
     "tiferet_fast",
+    "tiferet_fast.assets",
     "tiferet_fast.blueprints",
     "tiferet_fast.contexts"
 ]
