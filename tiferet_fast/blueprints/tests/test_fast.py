@@ -3,12 +3,15 @@
 # *** imports
 
 # ** core
+from functools import partial
+from inspect import signature
 from unittest import mock
 
 # ** infra
 import pytest
+from fastapi import FastAPI, Request
 from fastapi.routing import APIRouter
-from tiferet import TiferetError, use_tester
+from tiferet import TiferetError, TiferetAPIError, use_tester
 from tiferet.blueprints import core
 from tiferet.contexts.cache import CacheContext
 from tiferet.domain import AppSession
@@ -22,6 +25,7 @@ from ...assets.core import (
     GET_ROUTERS_EVT_SERVICE_ID,
     GET_STATUS_CODE_EVT_SERVICE_ID,
 )
+from ...assets.errors import handle_tiferet_api_error
 from ...contexts.fast import FastApiContext
 from ..fast import (
     build_fast_session_context,
@@ -31,7 +35,31 @@ from ..fast import (
     get_routers_handler,
     get_status_code_handler,
     resolve_model,
+    build_fast_app,
+    run,
 )
+
+# *** functions
+
+# ** function: iter_app_routes
+def iter_app_routes(app: FastAPI):
+    '''
+    Yield route objects that expose a path attribute.
+
+    FastAPI 0.141 stores include_router results as _IncludedRouter
+    objects on app.routes instead of flattening APIRoute entries.
+
+    :param app: The assembled FastAPI application.
+    :type app: FastAPI
+    '''
+
+    # Yield nested router routes, otherwise the route itself.
+    for route in app.routes:
+        nested = getattr(route, 'original_router', None)
+        if nested is not None:
+            yield from nested.routes
+        else:
+            yield route
 
 # *** fixtures
 
@@ -134,6 +162,16 @@ def cache() -> CacheContext:
 
     # Build the framework default cache.
     return core.build_cache()
+
+# ** fixture: mock_app_session
+@pytest.fixture
+def mock_app_session() -> mock.Mock:
+    '''
+    Fixture providing the AppSession stand-in returned by patched core.get_app_session.
+    '''
+
+    # Return a mock app session.
+    return mock.Mock()
 
 # *** tests
 
@@ -545,3 +583,290 @@ class TestBuildFastSessionContext:
 
         # Assert the custom request handler is wired without wrapping.
         assert result._create_request is custom_handler
+
+# ** tester: test_build_fast_app
+@use_tester(
+    type='generic',
+    target_cls=build_fast_app,
+)
+class TestBuildFastApp:
+    '''
+    Generic tester for build_fast_app. Patches core.build_cache, core.get_app_session, and build_fast_session_context on tiferet_fast.blueprints.fast.
+    '''
+
+    # * test: includes_one_router_per_result
+    def test_build_fast_app_includes_one_router_per_result(
+            self,
+            session,
+            sample_router_plain,
+            mock_view_func,
+            mock_app_session,
+        ) -> None:
+        '''
+        Verify build_fast_app includes one FastAPI router per declared ApiRouter.
+
+        :param session: A fresh test session.
+        :type session: TestSessionContext
+        :param sample_router_plain: A sample ApiRouter without Swagger metadata.
+        :type sample_router_plain: ApiRouter
+        :param mock_view_func: A mock view function.
+        :type mock_view_func: mock.Mock
+        :param mock_app_session: The AppSession stand-in.
+        :type mock_app_session: mock.Mock
+        '''
+
+        # Arrange the composed context and patched session collaborators.
+        mock_cache = mock.Mock()
+        mock_context = mock.Mock()
+        mock_context.get_routers.return_value = [sample_router_plain]
+
+        # Exercise build_fast_app with the patched collaborators.
+        with mock.patch(
+            'tiferet_fast.blueprints.fast.core.build_cache',
+            return_value=mock_cache,
+        ), mock.patch(
+            'tiferet_fast.blueprints.fast.core.get_app_session',
+            return_value=mock_app_session,
+        ) as mock_get_app_session, mock.patch(
+            'tiferet_fast.blueprints.fast.build_fast_session_context',
+            return_value=mock_context,
+        ) as mock_build_session:
+            result = session.given(
+                interface_id='test_interface',
+                view_func=mock_view_func,
+            ).run(target=build_fast_app)
+
+        # Assert the assembled app includes one route per declared router.
+        assert isinstance(result, FastAPI)
+        assert any(
+            getattr(route, 'path', None) == '/calc/add'
+            for route in iter_app_routes(result)
+        )
+        assert result.title == 'test_interface API'
+        mock_get_app_session.assert_called_once_with('test_interface', mock_cache)
+        assert mock_build_session.call_args.args == (mock_app_session, mock_cache)
+
+    # * test: extra_parameters_go_to_get_app_session
+    def test_build_fast_app_extra_parameters_go_to_get_app_session(
+            self,
+            session,
+            mock_view_func,
+            mock_app_session,
+        ) -> None:
+        '''
+        Verify extra kwargs reach only core.get_app_session.
+
+        :param session: A fresh test session.
+        :type session: TestSessionContext
+        :param mock_view_func: A mock view function.
+        :type mock_view_func: mock.Mock
+        :param mock_app_session: The AppSession stand-in.
+        :type mock_app_session: mock.Mock
+        '''
+
+        # Arrange an empty router list and patched session collaborators.
+        mock_cache = mock.Mock()
+        mock_context = mock.Mock()
+        mock_context.get_routers.return_value = []
+
+        # Exercise build_fast_app with an extra keyword argument.
+        with mock.patch(
+            'tiferet_fast.blueprints.fast.core.build_cache',
+            return_value=mock_cache,
+        ), mock.patch(
+            'tiferet_fast.blueprints.fast.core.get_app_session',
+            return_value=mock_app_session,
+        ) as mock_get_app_session, mock.patch(
+            'tiferet_fast.blueprints.fast.build_fast_session_context',
+            return_value=mock_context,
+        ):
+            session.given(
+                interface_id='test_interface',
+                view_func=mock_view_func,
+                extra_param='should_forward',
+            ).run(target=build_fast_app)
+
+        # Assert extra kwargs reach only core.get_app_session.
+        mock_get_app_session.assert_called_once_with(
+            'test_interface',
+            mock_cache,
+            extra_param='should_forward',
+        )
+
+    # * test: omitted_view_func_binds_request_only_wrapper
+    def test_build_fast_app_omitted_view_func_binds_request_only_wrapper(
+            self,
+            session,
+            sample_router_plain,
+            mock_app_session,
+        ) -> None:
+        '''
+        Verify omitting view_func binds a request-only wrapper around the asset view.
+
+        :param session: A fresh test session.
+        :type session: TestSessionContext
+        :param sample_router_plain: A sample ApiRouter without Swagger metadata.
+        :type sample_router_plain: ApiRouter
+        :param mock_app_session: The AppSession stand-in.
+        :type mock_app_session: mock.Mock
+        '''
+
+        # Arrange the composed context and patched session collaborators.
+        mock_context = mock.Mock()
+        mock_context.get_routers.return_value = [sample_router_plain]
+
+        # Exercise build_fast_app without a consumer view function.
+        with mock.patch(
+            'tiferet_fast.blueprints.fast.core.build_cache',
+            return_value=mock.Mock(),
+        ), mock.patch(
+            'tiferet_fast.blueprints.fast.core.get_app_session',
+            return_value=mock_app_session,
+        ), mock.patch(
+            'tiferet_fast.blueprints.fast.build_fast_session_context',
+            return_value=mock_context,
+        ):
+            result = session.given(interface_id='test_interface').run(
+                target=build_fast_app
+            )
+
+        # Assert the included route endpoint is a request-only partial wrapper.
+        endpoint = next(
+            route.endpoint
+            for route in iter_app_routes(result)
+            if getattr(route, 'path', None) == '/calc/add'
+        )
+        assert isinstance(endpoint, partial)
+        assert list(signature(endpoint.func).parameters) == ['request']
+        assert signature(endpoint.func).parameters['request'].annotation is Request
+
+    # * test: supplied_view_func_is_the_endpoint
+    def test_build_fast_app_supplied_view_func_is_the_endpoint(
+            self,
+            session,
+            sample_router_plain,
+            mock_view_func,
+            mock_app_session,
+        ) -> None:
+        '''
+        Verify a supplied view_func is the included route endpoint func.
+
+        :param session: A fresh test session.
+        :type session: TestSessionContext
+        :param sample_router_plain: A sample ApiRouter without Swagger metadata.
+        :type sample_router_plain: ApiRouter
+        :param mock_view_func: A mock view function.
+        :type mock_view_func: mock.Mock
+        :param mock_app_session: The AppSession stand-in.
+        :type mock_app_session: mock.Mock
+        '''
+
+        # Arrange the composed context and patched session collaborators.
+        mock_context = mock.Mock()
+        mock_context.get_routers.return_value = [sample_router_plain]
+
+        # Exercise build_fast_app with a supplied view function.
+        with mock.patch(
+            'tiferet_fast.blueprints.fast.core.build_cache',
+            return_value=mock.Mock(),
+        ), mock.patch(
+            'tiferet_fast.blueprints.fast.core.get_app_session',
+            return_value=mock_app_session,
+        ), mock.patch(
+            'tiferet_fast.blueprints.fast.build_fast_session_context',
+            return_value=mock_context,
+        ):
+            result = session.given(
+                interface_id='test_interface',
+                view_func=mock_view_func,
+            ).run(target=build_fast_app)
+
+        # Assert the included route endpoint is a partial of the supplied view.
+        endpoint = next(
+            route.endpoint
+            for route in iter_app_routes(result)
+            if getattr(route, 'path', None) == '/calc/add'
+        )
+        assert isinstance(endpoint, partial)
+        assert endpoint.func is mock_view_func
+
+    # * test: registers_tiferet_api_error_handler
+    def test_build_fast_app_registers_tiferet_api_error_handler(
+            self,
+            session,
+            mock_view_func,
+            mock_app_session,
+        ) -> None:
+        '''
+        Verify TiferetAPIError is registered to handle_tiferet_api_error.
+
+        :param session: A fresh test session.
+        :type session: TestSessionContext
+        :param mock_view_func: A mock view function.
+        :type mock_view_func: mock.Mock
+        :param mock_app_session: The AppSession stand-in.
+        :type mock_app_session: mock.Mock
+        '''
+
+        # Arrange an empty router list and patched session collaborators.
+        mock_context = mock.Mock()
+        mock_context.get_routers.return_value = []
+
+        # Exercise build_fast_app with the patched collaborators.
+        with mock.patch(
+            'tiferet_fast.blueprints.fast.core.build_cache',
+            return_value=mock.Mock(),
+        ), mock.patch(
+            'tiferet_fast.blueprints.fast.core.get_app_session',
+            return_value=mock_app_session,
+        ), mock.patch(
+            'tiferet_fast.blueprints.fast.build_fast_session_context',
+            return_value=mock_context,
+        ):
+            result = session.given(
+                interface_id='test_interface',
+                view_func=mock_view_func,
+            ).run(target=build_fast_app)
+
+        # Assert the catalogued API error handler is registered once.
+        assert result.exception_handlers[TiferetAPIError] is handle_tiferet_api_error
+
+# ** tester: test_run
+@use_tester(
+    type='generic',
+    target_cls=run,
+)
+class TestRun:
+    '''
+    Generic tester for run, a thin alias for build_fast_app.
+    '''
+
+    # * test: delegates_to_build_fast_app
+    def test_run_delegates_to_build_fast_app(self, session, mock_view_func) -> None:
+        '''
+        Verify run forwards to build_fast_app and returns its result.
+
+        :param session: A fresh test session.
+        :type session: TestSessionContext
+        :param mock_view_func: A mock view function.
+        :type mock_view_func: mock.Mock
+        '''
+
+        # Exercise run against a patched build_fast_app.
+        with mock.patch(
+            'tiferet_fast.blueprints.fast.build_fast_app',
+            return_value=mock.sentinel.fast_app,
+        ) as mock_build_fast_app:
+            result = session.given(
+                interface_id='test_interface',
+                view_func=mock_view_func,
+                app_yaml_file='app.yml',
+            ).run(target=run)
+
+        # Assert run is a thin alias for build_fast_app.
+        mock_build_fast_app.assert_called_once_with(
+            'test_interface',
+            view_func=mock_view_func,
+            app_yaml_file='app.yml',
+        )
+        assert result is mock.sentinel.fast_app
