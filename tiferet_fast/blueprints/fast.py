@@ -8,23 +8,10 @@ from typing import Any, Callable, List
 from functools import partial
 
 # ** infra
-from fastapi import FastAPI as FastAPIApp
+from fastapi import FastAPI as FastAPIApp, Request
 from fastapi.routing import APIRouter
-from starlette.middleware import Middleware
-from starlette_context import plugins
-from starlette_context.middleware import RawContextMiddleware
-from tiferet import TiferetError, assets as a
+from tiferet import TiferetError, TiferetAPIError, assets as a
 from tiferet.blueprints import core
-try:
-    from tiferet.blueprints.main import (
-        resolve_interface,
-        realize_interface,
-        create_service_provider,
-    )
-except ImportError:
-    resolve_interface = None
-    realize_interface = None
-    create_service_provider = None
 from tiferet.contexts.app import AppSession
 from tiferet.contexts.cache import CacheContext
 from tiferet_openapi import ApiRouter, create_openapi_request_context
@@ -36,6 +23,8 @@ from ..assets.core import (
     GET_ROUTERS_EVT_SERVICE_ID,
     GET_STATUS_CODE_EVT_SERVICE_ID,
 )
+from ..assets.errors import handle_tiferet_api_error
+from ..assets.view import view_func as default_view_func
 from ..contexts.fast import FastApiContext
 
 # *** blueprints
@@ -249,68 +238,55 @@ def build_router(router: ApiRouter, view_func: Callable, **kwargs) -> APIRouter:
 
 
 # ** blueprint: build_fast_app
-def build_fast_app(interface_id: str, view_func: Callable, **parameters) -> FastAPIApp:
+def build_fast_app(interface_id: str, view_func: Callable = None, **parameters) -> FastAPIApp:
     '''
-    Build a complete FastAPI application with middleware and routers.
+    Build a complete FastAPI application and include declared routers.
 
-    Resolves the interface via tiferet.blueprints.main.resolve_interface,
-    realizes it via realize_interface, builds middleware, and assembles
-    a FastAPI app with routers.
+    Loads the app session via core.build_cache/core.get_app_session, composes the FastApiContext via build_fast_session_context, binds the built-in view when view_func is omitted, registers handle_tiferet_api_error once, and includes one FastAPI router per declared ApiRouter.
 
     :param interface_id: The interface ID to load.
     :type interface_id: str
-    :param view_func: The view function to handle requests.
+    :param view_func: Optional request-only view function. When omitted, the built-in asset view is bound to the composed context.
     :type view_func: Callable
-    :param parameters: Additional parameters for interface resolution.
+    :param parameters: Additional keyword arguments passed to core.get_app_session.
     :type parameters: dict
     :return: A configured FastAPI application instance.
     :rtype: FastAPIApp
     '''
 
-    # Resolve the interface definition.
-    app_interface, default_services = resolve_interface(interface_id, **parameters)
+    # Build the bootstrap cache and resolve the app session.
+    cache = core.build_cache()
+    app_session = core.get_app_session(interface_id, cache, **parameters)
 
-    # Realize the app interface context.
-    interface_context = realize_interface(app_interface, interface_id)
+    # Compose the FastAPI context.
+    interface_context = build_fast_session_context(app_session, cache)
 
-    # Create middleware.
-    middleware = [
-        Middleware(
-            RawContextMiddleware,
-            plugins=(
-                plugins.RequestIdPlugin(),
-                plugins.CorrelationIdPlugin(),
-            ),
-        )
-    ]
+    # Bind the built-in asset view when the consumer does not supply one.
+    if view_func is None:
+
+        async def bound_view(request: Request) -> Any:
+            return await default_view_func(request, interface_context)
+
+    else:
+        bound_view = view_func
 
     # Create the FastAPI app.
-    fast_app = FastAPIApp(
-        title=f'{interface_id} API',
-        middleware=middleware,
-    )
+    fast_app = FastAPIApp(title=f'{interface_id} API',)
 
-    # Build a service provider seeded with default service dependencies
-    # so get_routers can resolve the routers event.
-    service_provider = create_service_provider(
-        type_map={dep.service_id: dep.get_service_type() for dep in default_services},
-        **{k: v for dep in default_services for k, v in dep.parameters.items()},
-        **(app_interface.constants or {}),
-        **parameters,
-    )
+    # Register the TiferetAPIError handler so uncaught catalogued errors surface as ApiErrorResponse JSON instead of FastAPI's default 500.
+    fast_app.add_exception_handler(TiferetAPIError, handle_tiferet_api_error)
 
-    # Load and include routers.
-    routers = get_routers(service_provider)
+    # Load and include routers using the composed context.
+    routers = get_routers(interface_context)
     for router in routers:
-        api_router = build_router(router, view_func=view_func)
-        fast_app.include_router(api_router)
+        fast_app.include_router(build_router(router, view_func=bound_view))
 
     # Return the assembled FastAPI application.
     return fast_app
 
 
 # ** blueprint: run
-def run(interface_id: str, view_func: Callable, **parameters) -> FastAPIApp:
+def run(interface_id: str, view_func: Callable = None, **parameters) -> FastAPIApp:
     '''
     Build and return a ready-to-serve FastAPI application.
 
@@ -318,13 +294,13 @@ def run(interface_id: str, view_func: Callable, **parameters) -> FastAPIApp:
 
     :param interface_id: The interface ID to load.
     :type interface_id: str
-    :param view_func: The view function to handle requests.
+    :param view_func: Optional request-only view function.
     :type view_func: Callable
-    :param parameters: Additional parameters for interface resolution.
+    :param parameters: Additional keyword arguments.
     :type parameters: dict
     :return: A configured FastAPI application instance.
     :rtype: FastAPIApp
     '''
 
     # Build and return the FastAPI application.
-    return build_fast_app(interface_id, view_func, **parameters)
+    return build_fast_app(interface_id, view_func=view_func, **parameters)
