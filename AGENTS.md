@@ -7,7 +7,7 @@
 - **Repository:** https://github.com/greatstrength/tiferet-fast
 - **Branch:** `v1.x-proto`
 - **Python:** ≥ 3.10
-- **Version:** `1.0.0b2`
+- **Version:** `1.0.0b3`
 - **Dependencies:** `tiferet>=2.1.0`, `tiferet-openapi>=1.0.0`, `fastapi>=0.118.0`, `starlette-context>=0.4.0`
 
 ## Architecture
