@@ -73,7 +73,6 @@ def resolve_model(model_path: str | None) -> type | None:
             reason=str(exception),
         )
 
-
 # ** blueprint: get_route_handler
 def get_route_handler(get_dependency: Callable) -> Callable:
     '''
@@ -94,7 +93,6 @@ def get_route_handler(get_dependency: Callable) -> Callable:
 
     # Return the closure.
     return handler
-
 
 # ** blueprint: get_status_code_handler
 def get_status_code_handler(get_dependency: Callable) -> Callable:
@@ -117,7 +115,6 @@ def get_status_code_handler(get_dependency: Callable) -> Callable:
     # Return the closure.
     return handler
 
-
 # ** blueprint: get_routers_handler
 def get_routers_handler(get_dependency: Callable) -> Callable:
     '''
@@ -138,7 +135,6 @@ def get_routers_handler(get_dependency: Callable) -> Callable:
 
     # Return the closure.
     return handler
-
 
 # ** blueprint: create_fast_request_handler
 def create_fast_request_handler(header_keys: dict) -> Callable:
@@ -167,7 +163,6 @@ def create_fast_request_handler(header_keys: dict) -> Callable:
 
     # Return the closure.
     return handler
-
 
 # ** blueprint: build_fast_session_context
 def build_fast_session_context(app_session: AppSession,
@@ -215,7 +210,6 @@ def build_fast_session_context(app_session: AppSession,
         **extra_kwargs,
     )
 
-
 # ** blueprint: get_routers
 def get_routers(interface_context: FastApiContext) -> List[ApiRouter]:
     '''
@@ -229,7 +223,6 @@ def get_routers(interface_context: FastApiContext) -> List[ApiRouter]:
 
     # Retrieve the routers from the interface context.
     return interface_context.get_routers()
-
 
 # ** blueprint: build_router
 def build_router(router: ApiRouter, view_func: Callable, **kwargs) -> APIRouter:
@@ -273,7 +266,6 @@ def build_router(router: ApiRouter, view_func: Callable, **kwargs) -> APIRouter:
 
     # Return the configured router.
     return api_router
-
 
 # ** blueprint: build_fast_app
 def build_fast_app(interface_id: str, view_func: Callable = None, **parameters) -> FastAPIApp:
@@ -348,7 +340,6 @@ def build_fast_app(interface_id: str, view_func: Callable = None, **parameters) 
 
     # Return the assembled FastAPI application.
     return fast_app
-
 
 # ** blueprint: run
 def run(interface_id: str, view_func: Callable = None, **parameters) -> FastAPIApp:
