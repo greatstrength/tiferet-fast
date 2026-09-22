@@ -36,36 +36,6 @@ from ..assets.errors import handle_tiferet_api_error
 from ..assets.view import view_func as default_view_func
 from ..contexts.fast import FastApiContext
 
-# *** functions
-
-# ** function: create_fast_request_handler
-def create_fast_request_handler(header_keys: dict) -> Callable:
-    '''
-    Build a request-construction handler that copies plugin ids onto headers.
-
-    Wraps create_openapi_request_context so Serve sees generated request and correlation ids without FastApiContext importing starlette_context.
-
-    :param header_keys: The resolved header names from parse_context_header_options.
-    :type header_keys: dict
-    :return: A 4-arg request-construction callable.
-    :rtype: Callable
-    '''
-
-    # Return the 4-arg adapter bound to the resolved header names.
-    def handler(interface_id: str,
-            feature_id: str,
-            headers: Dict[str, str] = None,
-            data: Dict[str, Any] = None) -> Any:
-
-        # Copy plugin ids onto the inbound headers when a request cycle exists.
-        merged = apply_context_headers(headers, header_keys)
-
-        # Construct the OpenAPI request context from the merged headers.
-        return create_openapi_request_context(interface_id, feature_id, headers=merged, data=data)
-
-    # Return the closure.
-    return handler
-
 # *** blueprints
 
 # ** blueprint: resolve_model
@@ -165,6 +135,35 @@ def get_routers_handler(get_dependency: Callable) -> Callable:
         # Resolve and execute the get-routers event.
         get_routers_evt = get_dependency(GET_ROUTERS_EVT_SERVICE_ID, APP_FLAG)
         return get_routers_evt.execute(**kwargs)
+
+    # Return the closure.
+    return handler
+
+
+# ** blueprint: create_fast_request_handler
+def create_fast_request_handler(header_keys: dict) -> Callable:
+    '''
+    Build a request-construction handler that copies plugin ids onto headers.
+
+    Wraps create_openapi_request_context so Serve sees generated request and correlation ids without FastApiContext importing starlette_context.
+
+    :param header_keys: The resolved header names from parse_context_header_options.
+    :type header_keys: dict
+    :return: A 4-arg request-construction callable.
+    :rtype: Callable
+    '''
+
+    # Return the 4-arg adapter bound to the resolved header names.
+    def handler(interface_id: str,
+            feature_id: str,
+            headers: Dict[str, str] = None,
+            data: Dict[str, Any] = None) -> Any:
+
+        # Copy plugin ids onto the inbound headers when a request cycle exists.
+        merged = apply_context_headers(headers, header_keys)
+
+        # Construct the OpenAPI request context from the merged headers.
+        return create_openapi_request_context(interface_id, feature_id, headers=merged, data=data)
 
     # Return the closure.
     return handler
