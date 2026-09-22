@@ -1,0 +1,1 @@
+"""FastAPI asset tests."""
